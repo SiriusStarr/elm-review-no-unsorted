@@ -192,6 +192,53 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
+        , test "preserves control flow when sorting would destroy it with tuples" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom1 = Foo | Bar | Baz
+
+type Custom2 = A | B | C
+
+toString : Custom1 -> Custom2 -> String
+toString custom1 custom2 =
+    case (custom1, custom2) of
+        (_, A) -> "A"
+        (Foo, _) -> "FooNotA"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "preserves control flow when sorting would destroy it with lists" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        [_, Foo] -> "_Foo"
+        [Foo, _] -> "Foo_"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "preserves control flow when sorting would destroy it with uncons" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        _ :: Foo :: _ -> "_Foo_"
+        Foo :: _ -> "Foo_"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
         ]
 
 
@@ -1000,6 +1047,149 @@ toString custom =
 
         bar ->
             "Bar"
+"""
+                        ]
+        , test "sorts past wildcards where possible with tuples" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom1 = Foo | Bar | Baz
+
+type Custom2 = A | B | C
+
+toString : Custom1 -> Custom2 -> String
+toString custom1 custom2 =
+    case (custom1, custom2) of
+        (_, B) -> "B"
+        (_, A) -> "A"
+        (Bar, _) -> "BarNotBOrA"
+        (Foo, _) -> "FooNotBOrA"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case (custom1, custom2) of
+        (_, B) -> "B"
+        (_, A) -> "A"
+        (Bar, _) -> "BarNotBOrA"
+        (Foo, _) -> "FooNotBOrA"
+        _ -> "Too many...\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom1 = Foo | Bar | Baz
+
+type Custom2 = A | B | C
+
+toString : Custom1 -> Custom2 -> String
+toString custom1 custom2 =
+    case ( custom1, custom2 ) of
+        ( _, A ) ->
+            "A"
+
+        ( _, B ) ->
+            "B"
+
+        ( Foo, _ ) ->
+            "FooNotBOrA"
+
+        ( Bar, _ ) ->
+            "BarNotBOrA"
+
+        _ ->
+            "Too many..."
+"""
+                        ]
+        , test "sorts past wildcards where possible with lists" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        [_, Bar] -> "_Bar"
+        [_, Foo] -> "_Foo"
+        [Bar, _] -> "Bar_"
+        [Foo, _] -> "Foo_"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            """case cs of
+        [_, Bar] -> "_Bar"
+        [_, Foo] -> "_Foo"
+        [Bar, _] -> "Bar_"
+        [Foo, _] -> "Foo_"
+        _ -> "Too many...\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        [ _, Foo ] ->
+            "_Foo"
+
+        [ _, Bar ] ->
+            "_Bar"
+
+        [ Foo, _ ] ->
+            "Foo_"
+
+        [ Bar, _ ] ->
+            "Bar_"
+
+        _ ->
+            "Too many..."
+"""
+                        ]
+        , test "sorts past wildcards where possible with uncons" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        _ :: Bar :: _ -> "_Bar_"
+        _ :: Foo :: _ -> "_Foo_"
+        Bar :: _ -> "Bar_"
+        Foo :: _ -> "Foo_"
+        _ -> "Too many..."
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case cs of
+        _ :: Bar :: _ -> "_Bar_"
+        _ :: Foo :: _ -> "_Foo_"
+        Bar :: _ -> "Bar_"
+        Foo :: _ -> "Foo_"
+        _ -> "Too many...\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : List Custom -> String
+toString cs =
+    case cs of
+        _ :: Foo :: _ ->
+            "_Foo_"
+
+        _ :: Bar :: _ ->
+            "_Bar_"
+
+        Foo :: _ ->
+            "Foo_"
+
+        Bar :: _ ->
+            "Bar_"
+
+        _ ->
+            "Too many..."
 """
                         ]
         ]

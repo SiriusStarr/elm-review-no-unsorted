@@ -846,15 +846,12 @@ comparePatterns config pat1 pat2 =
             \() -> comparePatterns config p1 p2
     in
     case ( pat1, pat2 ) of
-        -- Wildcards go last
-        ( Wildcard, Wildcard ) ->
+        -- Wildcards cannot be moved relative to non-wildcards, so return EQ which ensures index is used.
+        ( Wildcard, _ ) ->
             EQ
 
-        ( Wildcard, _ ) ->
-            GT
-
         ( _, Wildcard ) ->
-            LT
+            EQ
 
         -- Literals are simply compared; if sorting literals is turned off, then LiteralPatterns are not created at all
         ( Literal l1, Literal l2 ) ->
