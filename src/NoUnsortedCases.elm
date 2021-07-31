@@ -507,22 +507,33 @@ Constructor
     }
 ```
 
-  - `ListTupleOrUncons` -- A list, tuple, or uncons pattern, e.g. `(Nothing, Nothing) ->` becomes \`\`
+  - `ListTupleOrUncons` -- A list, tuple, or uncons pattern, e.g. `(Nothing, Nothing) ->` becomes
 
 ```
 ListTupleOrUncons
-    [ Constructor
-        { order = 1
-        , subpatterns = []
-        , type_ = ( [ "Basics" ], "Maybe" )
-        }
-    , Constructor
-        { order = 1
-        , subpatterns = []
-        , type_ = ( [ "Basics" ], "Maybe" )
-        }
-    ]
+    { subpatterns =
+        [ Constructor
+            { order = 1
+            , subpatterns = []
+            , type_ = ( [ "Basics" ], "Maybe" )
+            }
+        , Constructor
+            { order = 1
+            , subpatterns = []
+            , type_ = ( [ "Basics" ], "Maybe" )
+            }
+        ]
+    , terminates = True
+    }
 ```
+
+and `var :: _ ->` becomes
+
+    ListTupleOrUncons
+        { subpatterns =
+            [ Wildcard ]
+        , terminates = False
+        }
 
   - `Literal` -- A literal pattern, e.g. `1 ->` becomes
 
@@ -543,7 +554,10 @@ type SortablePattern
         , subpatterns : List (Maybe SortablePattern)
         , type_ : ( ModuleName, String )
         }
-    | ListTupleOrUncons (List SortablePattern)
+    | ListTupleOrUncons
+        { subpatterns : List SortablePattern
+        , terminates : Bool
+        }
     | Literal LiteralPattern
     | Wildcard
 
@@ -824,11 +838,23 @@ getSortablePattern ((RuleConfig config) as ruleConfig) context node =
         -- Tuples and lists we recursively convert each subpattern
         Pattern.TuplePattern ps ->
             MaybeX.traverse go ps
-                |> Maybe.map ListTupleOrUncons
+                |> Maybe.map
+                    (\subpatterns ->
+                        ListTupleOrUncons
+                            { subpatterns = subpatterns
+                            , terminates = True
+                            }
+                    )
 
         Pattern.ListPattern ps ->
             MaybeX.traverse go ps
-                |> Maybe.map ListTupleOrUncons
+                |> Maybe.map
+                    (\subpatterns ->
+                        ListTupleOrUncons
+                            { subpatterns = subpatterns
+                            , terminates = True
+                            }
+                    )
 
         -- Uncons pattern we recursively convert each subpattern and convert to the equivalent list
         Pattern.UnConsPattern p1 p2 ->
@@ -837,19 +863,16 @@ getSortablePattern ((RuleConfig config) as ruleConfig) context node =
                 cons x xs =
                     case xs of
                         Wildcard ->
-                            Just <| ListTupleOrUncons [ x, xs ]
+                            Just <|
+                                ListTupleOrUncons
+                                    { subpatterns = [ x ]
+                                    , terminates = False
+                                    }
 
-                        ListTupleOrUncons rest ->
-                            case Node.value <| getActualPattern p2 of
-                                Pattern.ListPattern _ ->
-                                    Just <| ListTupleOrUncons <| x :: rest
-
-                                Pattern.UnConsPattern _ _ ->
-                                    Just <| ListTupleOrUncons <| x :: rest
-
-                                _ ->
-                                    -- You can't cons onto anything else, so this is a type error
-                                    Nothing
+                        ListTupleOrUncons r ->
+                            Just <|
+                                ListTupleOrUncons
+                                    { r | subpatterns = x :: r.subpatterns }
 
                         _ ->
                             -- You can't cons onto a constructor or Literal, so this is a type error
@@ -931,9 +954,9 @@ compareLiteral l1 l2 =
 comparePatterns : RuleConfig -> SortablePattern -> SortablePattern -> Order
 comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
     let
-        go : SortablePattern -> SortablePattern -> () -> Order
+        go : SortablePattern -> SortablePattern -> Order
         go p1 p2 =
-            \() -> comparePatterns ruleConfig p1 p2
+            comparePatterns ruleConfig p1 p2
     in
     case ( pat1, pat2 ) of
         -- Wildcards cannot be moved relative to non-wildcards, so return EQ which ensures index is used.
@@ -955,7 +978,7 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
                     case ( pat1s, pat2s ) of
                         ( (Just p1) :: p1s, (Just p2) :: p2s ) ->
                             goSubs p1s p2s
-                                |> fallbackCompareFor (go p1 p2 ())
+                                |> fallbackCompareFor (go p1 p2)
 
                         ( Nothing :: p1s, Nothing :: p2s ) ->
                             -- If at the point where arguments are both unsortable, then proceed past if configured to
@@ -974,39 +997,49 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
                 |> fallbackCompareFor (compare c1.order c2.order)
 
         -- Lists, Tuples, and Uncons
-        -- Empty lists go first
-        ( ListTupleOrUncons [], ListTupleOrUncons [] ) ->
-            EQ
+        ( ListTupleOrUncons r1, ListTupleOrUncons r2 ) ->
+            case
+                ( ( r1.subpatterns, r1.terminates )
+                , ( r2.subpatterns, r2.terminates )
+                )
+            of
+                -- If the lists are the same length, infinite ones go later
+                ( ( [], False ), ( [], True ) ) ->
+                    GT
 
-        ( ListTupleOrUncons [], ListTupleOrUncons _ ) ->
-            LT
+                ( ( [], True ), ( [], False ) ) ->
+                    LT
 
-        ( ListTupleOrUncons _, ListTupleOrUncons [] ) ->
-            GT
+                ( ( [], _ ), ( [], _ ) ) ->
+                    EQ
 
-        -- Infinite match wildcards go after longer patterns
-        ( ListTupleOrUncons [ Wildcard ], ListTupleOrUncons [ Wildcard ] ) ->
-            EQ
+                -- If one list is shorter than another, it goes after if it is infinite or before if it isn't
+                ( ( _ :: _, _ ), ( [], True ) ) ->
+                    GT
 
-        ( ListTupleOrUncons [ Wildcard ], ListTupleOrUncons (_ :: _) ) ->
-            GT
+                ( ( _ :: _, _ ), ( [], False ) ) ->
+                    LT
 
-        ( ListTupleOrUncons (_ :: _), ListTupleOrUncons [ Wildcard ] ) ->
-            LT
+                ( ( [], True ), ( _ :: _, _ ) ) ->
+                    LT
 
-        -- Finally, we compare the patterns
-        ( ListTupleOrUncons (p1 :: p1s), ListTupleOrUncons (p2 :: p2s) ) ->
-            case config.sortLists of
-                LengthFirst ->
-                    (\() ->
-                        go (ListTupleOrUncons p1s) (ListTupleOrUncons p2s)
-                            |> fallbackCompareFor (go p1 p2 ())
-                    )
-                        |> fallbackCompareFor (comparePatternListLengths p1s p2s)
+                ( ( [], False ), ( _ :: _, _ ) ) ->
+                    GT
 
-                Elementwise ->
-                    go (ListTupleOrUncons p1s) (ListTupleOrUncons p2s)
-                        |> fallbackCompareFor (go p1 p2 ())
+                -- Otherwise, compare the lists sequentially
+                ( ( p1s, _ ), ( p2s, _ ) ) ->
+                    if config.sortLists == LengthFirst then
+                        (\() ->
+                            List.map2 go p1s p2s
+                                |> ListX.find ((/=) EQ)
+                                |> Maybe.withDefault EQ
+                        )
+                            |> fallbackCompareFor (comparePatternListLengths r1 r2)
+
+                    else
+                        List.map2 go p1s p2s
+                            |> ListX.find ((/=) EQ)
+                            |> Maybe.withDefault EQ
 
         -- Anything else should be a type error, so we needn't consider it
         _ ->
@@ -1017,22 +1050,30 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
 that a list must be infinitely long if it ends in a wildcard, with a shorter
 list ending in a wildcard being "longer" (more specified) than a longer one.
 -}
-comparePatternListLengths : List SortablePattern -> List SortablePattern -> Order
+comparePatternListLengths :
+    { subpatterns : List SortablePattern
+    , terminates : Bool
+    }
+    ->
+        { subpatterns : List SortablePattern
+        , terminates : Bool
+        }
+    -> Order
 comparePatternListLengths p1s p2s =
-    case ( ListX.last p1s == Just Wildcard, ListX.last p2s == Just Wildcard ) of
-        ( True, True ) ->
+    case ( p1s.terminates, p2s.terminates ) of
+        ( False, False ) ->
             -- Flip comparison if both end in wildcards
-            compare (List.length p2s) (List.length p1s)
-
-        ( True, False ) ->
-            GT
+            compare (List.length p2s.subpatterns) (List.length p1s.subpatterns)
 
         ( False, True ) ->
+            GT
+
+        ( True, False ) ->
             LT
 
-        ( False, False ) ->
+        ( True, True ) ->
             -- Compare normally if neither does
-            compare (List.length p1s) (List.length p2s)
+            compare (List.length p1s.subpatterns) (List.length p2s.subpatterns)
 
 
 {-| Given a range and a fix, create an unsorted case error.

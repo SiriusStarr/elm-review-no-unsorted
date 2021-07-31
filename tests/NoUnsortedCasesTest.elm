@@ -382,6 +382,26 @@ toString custom1 custom2 custom3 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
+        , test "preserves order when moving wildcards would create compile errors" <|
+            \() ->
+                """module A exposing (..)
+
+type Thing
+    = Thing Int Int
+    | OtherThing
+
+toInt : Thing -> Result a -> Int
+toInt foo bar =
+    case ( foo, bar) of
+        ( Thing _ _, _ ) ->
+            1
+        ( _, Ok _ ) ->
+            2
+        ( _, Err _ ) ->
+           3
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
         ]
 
 
@@ -544,6 +564,41 @@ toString xs =
         (Foo, 1) :: (Foo, 2) :: _ -> "Foo"
         (Bar, 1) :: (Bar, 2) :: _ -> "Bar"
         (Baz, 1) :: (Baz, 2) :: _ -> "Baz"
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "preserves order when mixed with lists when matches could be equally short in simple case" <|
+            \() ->
+                """module A exposing (..)
+
+foo : List String -> String
+foo list =
+    case list of
+        [] ->
+            ""
+        [ last ] ->
+            last
+        second :: rest ->
+            second ++ rest
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "preserves order when mixed with lists when matches could be equally short in complex case" <|
+            \() ->
+                """module A exposing (..)
+
+type Nonempty a
+    = Nonempty a (List a)
+
+foo : String -> Nonempty String -> String
+foo fn list =
+    case list of
+        Nonempty first [] ->
+            first
+        Nonempty first [ last ] ->
+            first ++ " " ++ fn ++ " " ++ last
+        Nonempty first (second :: rest) ->
+            first ++ ", " ++ foo fn (Nonempty second rest)
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
