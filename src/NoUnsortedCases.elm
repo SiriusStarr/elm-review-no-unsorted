@@ -194,12 +194,12 @@ import Elm.Syntax.Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import List.Extra as ListX
 import Maybe.Extra as MaybeX
-import Review.Fix as Fix
+import Review.Fix exposing (Fix)
 import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameFor)
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
-import Util exposing (expressionToFix, fallbackCompareFor)
+import Util exposing (createFix, fallbackCompareFor)
 
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -393,8 +393,7 @@ type alias ProjectContext =
 names to orders.
 -}
 type alias ModuleContext =
-    { lookupTable : ModuleNameLookupTable
-    , customTypes :
+    { customTypes :
         Dict
             ModuleName
             (Dict
@@ -403,6 +402,8 @@ type alias ModuleContext =
                 , declarationOrder : List String
                 }
             )
+    , lookupTable : ModuleNameLookupTable
+    , extractSourceCode : Range -> String
     }
 
 
@@ -512,12 +513,14 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable projectContext ->
-            { lookupTable = lookupTable
-            , customTypes = projectContext.customTypes
+        (\lookupTable sourceCodeExtractor projectContext ->
+            { customTypes = projectContext.customTypes
+            , lookupTable = lookupTable
+            , extractSourceCode = sourceCodeExtractor
             }
         )
         |> Rule.withModuleNameLookupTable
+        |> Rule.withSourceCodeExtractor
 
 
 {-| Combine `ProjectContext`s by taking the union of known type orders.
@@ -636,7 +639,7 @@ are sorted properly.
 expressionVisitor : RuleConfig -> Node Expression -> ModuleContext -> ( List (Error {}), ModuleContext )
 expressionVisitor config node context =
     case Node.value node of
-        Expression.CaseExpression ({ cases } as r) ->
+        Expression.CaseExpression { cases } ->
             -- Convert all patterns to sortable ones, if we can
             MaybeX.traverse (getSortablePattern config context << Tuple.first) cases
                 -- Pair with index for stable sort
@@ -660,8 +663,7 @@ expressionVisitor config node context =
                                         in
                                         -- Generate a fix if unsorted
                                         Just
-                                            ( Expression.CaseExpression { r | cases = List.map Tuple.second sorted }
-                                                |> expressionToFix range
+                                            ( createFix context.extractSourceCode sorted
                                                 |> unsortedError range
                                                 |> List.singleton
                                             , context
@@ -868,7 +870,7 @@ comparePatterns config pat1 pat2 =
                                 |> fallbackCompareFor (go p1 p2 ())
 
                         _ ->
-                            -- Lists should be even, so other cases aren'g sortable
+                            -- Lists should be even, so other cases aren't sortable
                             EQ
             in
             -- Fallback to subpatterns
@@ -939,13 +941,11 @@ comparePatternListLengths p1s p2s =
 
 {-| Given a range and a fix, create an unsorted case error.
 -}
-unsortedError : Range -> String -> Error {}
-unsortedError range fix =
+unsortedError : Range -> List Fix -> Error {}
+unsortedError =
     Rule.errorWithFix
         { message = "Case patterns are not sorted."
         , details =
             [ "Case patterns were found out of order.  They should be sorted as specified in the rule configuration."
             ]
         }
-        range
-        [ Fix.replaceRangeBy range fix ]

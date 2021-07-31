@@ -1,9 +1,10 @@
-module Util exposing (expressionToFix, fallbackCompareFor)
+module Util exposing (createFix, fallbackCompareFor)
 
-import Elm.Pretty exposing (prettyExpression)
-import Elm.Syntax.Expression exposing (Expression)
-import Elm.Syntax.Range exposing (Range)
-import Pretty exposing (pretty)
+import Elm.Syntax.Expression exposing (Case)
+import Elm.Syntax.Node as Node
+import Elm.Syntax.Range as Range exposing (Range)
+import List.Extra as ListX
+import Review.Fix as Fix exposing (Fix)
 
 
 {-| Use the first order, or use the second order if the first is `EQ`. This is
@@ -24,40 +25,36 @@ fallbackCompareFor comp fallback =
             ltOrGt
 
 
-{-| Given a range and an expression, create a fixed string from the expression.
+{-| Given a source code extractor and a sorted list of patterns (with original
+indices), create fixes to resort the source code to the list.
 -}
-expressionToFix : Range -> Expression -> String
-expressionToFix range e =
-    prettyPrintExpression 120 e
-        |> reindent range.start.column
-
-
-{-| Re-indent a section of generated code to ensure that it doesn't cause issues
-when used as a fix.
--}
-reindent : Int -> String -> String
-reindent amount =
+createFix : (Range -> String) -> List ( ( Int, a ), Case ) -> List Fix
+createFix extractSourceCode sorted =
     let
-        indent : String
-        indent =
-            String.repeat (amount - 1) " "
+        applyFix : Int -> ( ( Int, a ), Case ) -> List Fix
+        applyFix newIndex ( ( oldIndex, _ ), ( pattern, expression ) ) =
+            if newIndex == oldIndex then
+                []
+
+            else
+                ListX.find ((==) newIndex << Tuple.first << Tuple.first) sorted
+                    |> Maybe.map
+                        (Tuple.second
+                            >> (\( p, e ) -> [ Node.range p, Node.range e ])
+                            >> Range.combine
+                        )
+                    |> Maybe.map
+                        (\oldRange ->
+                            [ Fix.removeRange oldRange
+                            , Range.combine
+                                [ Node.range pattern
+                                , Node.range expression
+                                ]
+                                |> extractSourceCode
+                                |> Fix.insertAt oldRange.end
+                            ]
+                        )
+                    |> Maybe.withDefault []
     in
-    String.lines
-        >> List.indexedMap
-            (\i l ->
-                -- Don't indent first line or empty lines
-                if i /= 0 && not (String.isEmpty l) then
-                    indent ++ l
-
-                else
-                    l
-            )
-        >> String.join "\n"
-
-
-{-| Turn an expression into nicely-formatted, valid Elm code, breaking at a specified width.
--}
-prettyPrintExpression : Int -> Expression -> String
-prettyPrintExpression width expression =
-    prettyExpression expression
-        |> pretty width
+    List.indexedMap applyFix sorted
+        |> List.concat

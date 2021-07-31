@@ -704,16 +704,12 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Bar ->
-            "Bar"
-
-        Baz ->
-            "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
 """
                         ]
+        , fixesProperly
         , failsCrossModule
         , failsWildcards
         , failsTransparentPatterns
@@ -723,6 +719,159 @@ toString custom =
         , failsLiterals
         , failsTypesFromDependencies
         , failsSubpatterns
+        ]
+
+
+fixesProperly : Test
+fixesProperly =
+    describe "automatic fixes"
+        [ test "preserve comments" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    -- A case
+    case custom of
+        Bar ->
+            -- Bar
+            "Bar"
+
+        Baz ->
+            -- Baz
+            "Baz"
+
+        Foo ->
+            -- Foo
+            "Foo"
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case custom of
+        Bar ->
+            -- Bar
+            "Bar"
+
+        Baz ->
+            -- Baz
+            "Baz"
+
+        Foo ->
+            -- Foo
+            "Foo\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    -- A case
+    case custom of
+        Foo ->
+            -- Foo
+            "Foo"
+
+        Bar ->
+            -- Bar
+            "Bar"
+
+        Baz ->
+            -- Baz
+            "Baz"
+"""
+                        ]
+        , test "work with multiline expression/patterns" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String -> String
+toString custom string =
+    -- A case
+    case
+        ( custom
+        , string
+        )
+    of
+        ( Bar, "A pattern" ) ->
+            -- Bar
+            "Bar"
+
+        ( Baz, Foo ) ->
+            -- Baz
+            "Baz"
+
+        ( Foo, _ ) ->
+            -- Foo
+            toString
+                |> toPipeline
+                |> andSuch
+
+        _ ->
+            \"\"\"Multiline
+        string
+        expression?\"\"\"
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case
+        ( custom
+        , string
+        )
+    of
+        ( Bar, "A pattern" ) ->
+            -- Bar
+            "Bar"
+
+        ( Baz, Foo ) ->
+            -- Baz
+            "Baz"
+
+        ( Foo, _ ) ->
+            -- Foo
+            toString
+                |> toPipeline
+                |> andSuch
+
+        _ ->
+            \"\"\"Multiline
+        string
+        expression?\"\"\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String -> String
+toString custom string =
+    -- A case
+    case
+        ( custom
+        , string
+        )
+    of
+        ( Foo, _ ) ->
+            -- Foo
+            toString
+                |> toPipeline
+                |> andSuch
+
+        ( Bar, "A pattern" ) ->
+            -- Bar
+            "Bar"
+
+        ( Baz, Foo ) ->
+            -- Baz
+            "Baz"
+
+        _ ->
+            \"\"\"Multiline
+        string
+        expression?\"\"\"
+"""
+                        ]
         ]
 
 
@@ -761,14 +910,9 @@ import A exposing (Custom(..))
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Bar ->
-            "Bar"
-
-        Baz ->
-            "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
 """
                             ]
                           )
@@ -806,14 +950,9 @@ import A
 toString : Custom -> String
 toString custom =
     case custom of
-        A.Foo ->
-            "Foo"
-
-        A.Bar ->
-            "Bar"
-
-        A.Baz ->
-            "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+        A.Baz -> "Baz"
 """
                             ]
                           )
@@ -857,14 +996,9 @@ import B
 toString : Custom -> String
 toString custom =
     case custom of
-        A.Foo ->
-            "Foo"
-
-        A.Bar ->
-            "Bar"
-
-        A.Baz ->
-            "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+        A.Baz -> "Baz"
 """
                             ]
                           )
@@ -908,14 +1042,9 @@ import B exposing (Custom(..))
 toString : Custom -> String
 toString custom =
     case custom of
-        Baz ->
-            "Baz"
-
-        Bar ->
-            "Bar"
-
-        Foo ->
-            "Foo"
+        Baz -> "Baz"
+        Bar -> "Bar"
+        Foo -> "Foo"
 """
                             ]
                           )
@@ -957,14 +1086,9 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Bar ->
-            "Bar"
-
-        Baz ->
-            "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
 """
                             ]
                           )
@@ -1002,14 +1126,9 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Baz ->
-            "Baz"
-
-        _ ->
-            "Bar"
+        Foo -> "Foo"
+        Baz -> "Baz"
+        _ -> "Bar"
 """
                         ]
         , test "is not sorted with var pattern at end" <|
@@ -1039,14 +1158,9 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Baz ->
-            "Baz"
-
-        bar ->
-            "Bar"
+        Foo -> "Foo"
+        Baz -> "Baz"
+        bar -> "Bar"
 """
                         ]
         , test "sorts past wildcards where possible with tuples" <|
@@ -1082,21 +1196,12 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> String
 toString custom1 custom2 =
-    case ( custom1, custom2 ) of
-        ( _, A ) ->
-            "A"
-
-        ( _, B ) ->
-            "B"
-
-        ( Foo, _ ) ->
-            "FooNotBOrA"
-
-        ( Bar, _ ) ->
-            "BarNotBOrA"
-
-        _ ->
-            "Too many..."
+    case (custom1, custom2) of
+        (_, A) -> "A"
+        (_, B) -> "B"
+        (Foo, _) -> "FooNotBOrA"
+        (Bar, _) -> "BarNotBOrA"
+        _ -> "Too many..."
 """
                         ]
         , test "sorts past wildcards where possible with lists" <|
@@ -1130,20 +1235,11 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString cs =
     case cs of
-        [ _, Foo ] ->
-            "_Foo"
-
-        [ _, Bar ] ->
-            "_Bar"
-
-        [ Foo, _ ] ->
-            "Foo_"
-
-        [ Bar, _ ] ->
-            "Bar_"
-
-        _ ->
-            "Too many..."
+        [_, Foo] -> "_Foo"
+        [_, Bar] -> "_Bar"
+        [Foo, _] -> "Foo_"
+        [Bar, _] -> "Bar_"
+        _ -> "Too many..."
 """
                         ]
         , test "sorts past wildcards where possible with uncons" <|
@@ -1176,20 +1272,11 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString cs =
     case cs of
-        _ :: Foo :: _ ->
-            "_Foo_"
-
-        _ :: Bar :: _ ->
-            "_Bar_"
-
-        Foo :: _ ->
-            "Foo_"
-
-        Bar :: _ ->
-            "Bar_"
-
-        _ ->
-            "Too many..."
+        _ :: Foo :: _ -> "_Foo_"
+        _ :: Bar :: _ -> "_Bar_"
+        Foo :: _ -> "Foo_"
+        Bar :: _ -> "Bar_"
+        _ -> "Too many..."
 """
                         ]
         ]
@@ -1225,14 +1312,9 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        Bar ->
-            "Bar"
-
-        Baz ->
-            "Bar"
+        Foo -> "Foo"
+        Bar -> "Bar"
+        (Baz) -> "Bar"
 """
                         ]
         , test "is not sorted with as pattern" <|
@@ -1262,14 +1344,9 @@ type Custom = Foo | Bar | Baz
 toString : Custom -> String
 toString custom =
     case custom of
-        Foo ->
-            "Foo"
-
-        (Bar as b) ->
-            "Bar"
-
-        Baz ->
-            "Baz"
+        Foo -> "Foo"
+        (Bar as b) -> "Bar"
+        Baz -> "Baz"
 """
                         ]
         ]
@@ -1320,33 +1397,16 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> String
 toString custom1 custom2 =
-    case ( custom1, custom2 ) of
-        ( Foo, A ) ->
-            "FooA"
-
-        ( Foo, B ) ->
-            "FooB"
-
-        ( Foo, C ) ->
-            "FooC"
-
-        ( Bar, A ) ->
-            "BarA"
-
-        ( Bar, B ) ->
-            "BarB"
-
-        ( Bar, C ) ->
-            "BarC"
-
-        ( Baz, A ) ->
-            "BazA"
-
-        ( Baz, B ) ->
-            "BazB"
-
-        ( Baz, C ) ->
-            "BazC"
+    case (custom1, custom2) of
+        (Foo, A) -> "FooA"
+        (Foo, B) -> "FooB"
+        (Foo, C) -> "FooC"
+        (Bar, A) -> "BarA"
+        (Bar, B) -> "BarB"
+        (Bar, C) -> "BarC"
+        (Baz, A) -> "BazA"
+        (Baz, B) -> "BazB"
+        (Baz, C) -> "BazC"
 """
                         ]
         , test "is not sorted at second level" <|
@@ -1391,33 +1451,16 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> String
 toString custom1 custom2 =
-    case ( custom1, custom2 ) of
-        ( Foo, A ) ->
-            "FooA"
-
-        ( Foo, B ) ->
-            "FooB"
-
-        ( Foo, C ) ->
-            "FooC"
-
-        ( Bar, A ) ->
-            "BarA"
-
-        ( Bar, B ) ->
-            "BarB"
-
-        ( Bar, C ) ->
-            "BarC"
-
-        ( Baz, A ) ->
-            "BazA"
-
-        ( Baz, B ) ->
-            "BazB"
-
-        ( Baz, C ) ->
-            "BazC"
+    case (custom1, custom2) of
+        (Foo, A) -> "FooA"
+        (Foo, B) -> "FooB"
+        (Foo, C) -> "FooC"
+        (Bar, A) -> "BarA"
+        (Bar, B) -> "BarB"
+        (Bar, C) -> "BarC"
+        (Baz, A) -> "BazA"
+        (Baz, B) -> "BazB"
+        (Baz, C) -> "BazC"
 """
                         ]
         , test "is not sorted with threeples at third level" <|
@@ -1464,36 +1507,17 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> Custom1 -> String
 toString custom1 custom2 custom3 =
-    case ( custom1, custom2, custom3 ) of
-        ( Foo, A, Foo ) ->
-            "FooAFoo"
-
-        ( Foo, A, Bar ) ->
-            "FooABar"
-
-        ( Foo, A, Baz ) ->
-            "FooABaz"
-
-        ( Foo, B, Foo ) ->
-            "FooBFoo"
-
-        ( Foo, B, Bar ) ->
-            "FooBBar"
-
-        ( Foo, B, Baz ) ->
-            "FooBBaz"
-
-        ( Foo, C, Foo ) ->
-            "FooCFoo"
-
-        ( Foo, C, Bar ) ->
-            "FooCBar"
-
-        ( Foo, C, Baz ) ->
-            "FooCBaz"
-
-        _ ->
-            "Too many..."
+    case (custom1, custom2, custom3) of
+        (Foo, A, Foo) -> "FooAFoo"
+        (Foo, A, Bar) -> "FooABar"
+        (Foo, A, Baz) -> "FooABaz"
+        (Foo, B, Foo) -> "FooBFoo"
+        (Foo, B, Bar) -> "FooBBar"
+        (Foo, B, Baz) -> "FooBBaz"
+        (Foo, C, Foo) -> "FooCFoo"
+        (Foo, C, Bar) -> "FooCBar"
+        (Foo, C, Baz) -> "FooCBaz"
+        _ -> "Too many..."
 """
                         ]
         , test "is not sorted with nested tuples" <|
@@ -1540,36 +1564,17 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> Custom1 -> String
 toString custom1 custom2 custom3 =
-    case ( ( custom1, custom2 ), custom3 ) of
-        ( ( Foo, A ), Foo ) ->
-            "FooAFoo"
-
-        ( ( Foo, A ), Bar ) ->
-            "FooABar"
-
-        ( ( Foo, A ), Baz ) ->
-            "FooABaz"
-
-        ( ( Foo, B ), Foo ) ->
-            "FooBFoo"
-
-        ( ( Foo, B ), Bar ) ->
-            "FooBBar"
-
-        ( ( Foo, B ), Baz ) ->
-            "FooBBaz"
-
-        ( ( Foo, C ), Foo ) ->
-            "FooCFoo"
-
-        ( ( Foo, C ), Bar ) ->
-            "FooCBar"
-
-        ( ( Foo, C ), Baz ) ->
-            "FooCBaz"
-
-        _ ->
-            "Too many..."
+    case ((custom1, custom2), custom3) of
+        ((Foo, A), Foo) -> "FooAFoo"
+        ((Foo, A), Bar) -> "FooABar"
+        ((Foo, A), Baz) -> "FooABaz"
+        ((Foo, B), Foo) -> "FooBFoo"
+        ((Foo, B), Bar) -> "FooBBar"
+        ((Foo, B), Baz) -> "FooBBaz"
+        ((Foo, C), Foo) -> "FooCFoo"
+        ((Foo, C), Bar) -> "FooCBar"
+        ((Foo, C), Baz) -> "FooCBaz"
+        _ -> "Too many..."
 """
                         ]
         , test "is not sorted with deeply nested tuples" <|
@@ -1610,27 +1615,14 @@ type Custom2 = A | B | C
 
 toString : Custom1 -> Custom2 -> Custom1 -> String
 toString custom1 custom2 custom3 =
-    case ( ( custom1, ( custom2, custom2 ) ), custom3, ( custom2, custom2 ) ) of
-        ( ( Foo, ( A, A ) ), Foo, ( A, A ) ) ->
-            "1"
-
-        ( ( Foo, ( A, B ) ), Foo, ( A, A ) ) ->
-            "2"
-
-        ( ( Foo, ( A, C ) ), Foo, ( A, A ) ) ->
-            "3"
-
-        ( ( Foo, ( B, A ) ), Foo, ( A, A ) ) ->
-            "4"
-
-        ( ( Foo, ( B, A ) ), Foo, ( A, C ) ) ->
-            "5"
-
-        ( ( Foo, ( B, A ) ), Foo, ( B, A ) ) ->
-            "6"
-
-        _ ->
-            "Too many..."
+    case ((custom1, (custom2, custom2)), custom3, (custom2, custom2)) of
+        ((Foo, (A, A)), Foo, (A, A)) -> "1"
+        ((Foo, (A, B)), Foo, (A, A)) -> "2"
+        ((Foo, (A, C)), Foo, (A, A)) -> "3"
+        ((Foo, (B, A)), Foo, (A, A)) -> "4"
+        ((Foo, (B, A)), Foo, (A, C)) -> "5"
+        ((Foo, (B, A)), Foo, (B, A)) -> "6"
+        _ -> "Too many..."
 """
                         ]
         ]
@@ -1692,41 +1684,18 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        [ Foo ] ->
-            "Foo"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Baz ] ->
-            "Baz"
-
-        [ Foo, Foo ] ->
-            "FooFoo"
-
-        [ Foo, Bar ] ->
-            "FooBar"
-
-        [ Foo, Baz ] ->
-            "FooBaz"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        [ Bar, Bar ] ->
-            "BarBar"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        [ Foo, Foo, Foo ] ->
-            "FooFooFoo"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        [Foo] -> "Foo"
+        [Bar] -> "Bar"
+        [Baz] -> "Baz"
+        [Foo, Foo] -> "FooFoo"
+        [Foo, Bar] -> "FooBar"
+        [Foo, Baz] -> "FooBaz"
+        [Bar, Foo] -> "BarFoo"
+        [Bar, Bar] -> "BarBar"
+        [Bar, Baz] -> "BarBaz"
+        [Foo, Foo, Foo] -> "FooFooFoo"
+        _ -> "Too many..."
 """
                         ]
         , test "in elementwise order" <|
@@ -1774,41 +1743,18 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        [ Foo ] ->
-            "Foo"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Baz ] ->
-            "Baz"
-
-        [ Foo, Foo ] ->
-            "FooFoo"
-
-        [ Foo, Bar ] ->
-            "FooBar"
-
-        [ Foo, Baz ] ->
-            "FooBaz"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        [ Bar, Bar ] ->
-            "BarBar"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        [ Foo, Foo, Foo ] ->
-            "FooFooFoo"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        [Foo] -> "Foo"
+        [Bar] -> "Bar"
+        [Baz] -> "Baz"
+        [Foo, Foo] -> "FooFoo"
+        [Foo, Bar] -> "FooBar"
+        [Foo, Baz] -> "FooBaz"
+        [Bar, Foo] -> "BarFoo"
+        [Bar, Bar] -> "BarBar"
+        [Bar, Baz] -> "BarBaz"
+        [Foo, Foo, Foo] -> "FooFooFoo"
+        _ -> "Too many..."
 """
                         ]
         , test "with mixed list/uncons in elementwise order" <|
@@ -1863,53 +1809,22 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        [ Foo ] ->
-            "Foo"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Baz ] ->
-            "Baz"
-
-        Foo :: Foo :: [] ->
-            "FooFoo"
-
-        [ Foo, Bar ] ->
-            "FooBar"
-
-        [ Foo, Baz ] ->
-            "FooBaz"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        [ Bar, Bar ] ->
-            "BarBar"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        [ Foo, Foo, Foo ] ->
-            "FooFooFoo"
-
-        Bar :: Bar :: _ ->
-            "BarBar+"
-
-        Bar :: _ :: _ ->
-            "Bar++"
-
-        Foo :: _ ->
-            "Foo+"
-
-        Bar :: _ ->
-            "Bar+"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        [Foo] -> "Foo"
+        [Bar] -> "Bar"
+        [Baz] -> "Baz"
+        Foo :: Foo :: [] -> "FooFoo"
+        [Foo, Bar] -> "FooBar"
+        [Foo, Baz] -> "FooBaz"
+        [Bar, Foo] -> "BarFoo"
+        [Bar, Bar] -> "BarBar"
+        [Bar, Baz] -> "BarBaz"
+        [Foo, Foo, Foo] -> "FooFooFoo"
+        Bar :: Bar :: _ -> "BarBar+"
+        Bar :: _ :: _ -> "Bar++"
+        Foo :: _ -> "Foo+"
+        Bar :: _ -> "Bar+"
+        _ -> "Too many..."
 """
                         ]
         ]
@@ -1963,41 +1878,18 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        [ Foo ] ->
-            "Foo"
-
-        [ Foo, Foo ] ->
-            "FooFoo"
-
-        [ Foo, Foo, Foo ] ->
-            "FooFooFoo"
-
-        [ Foo, Bar ] ->
-            "FooBar"
-
-        [ Foo, Baz ] ->
-            "FooBaz"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        [ Bar, Bar ] ->
-            "BarBar"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        [ Baz ] ->
-            "Baz"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        [Foo] -> "Foo"
+        [Foo, Foo] -> "FooFoo"
+        [Foo, Foo, Foo] -> "FooFooFoo"
+        [Foo, Bar] -> "FooBar"
+        [Foo, Baz] -> "FooBaz"
+        [Bar] -> "Bar"
+        [Bar, Foo] -> "BarFoo"
+        [Bar, Bar] -> "BarBar"
+        [Bar, Baz] -> "BarBaz"
+        [Baz] -> "Baz"
+        _ -> "Too many..."
 """
                         ]
         , test "in length-first order" <|
@@ -2045,41 +1937,18 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        [ Foo ] ->
-            "Foo"
-
-        [ Foo, Foo ] ->
-            "FooFoo"
-
-        [ Foo, Foo, Foo ] ->
-            "FooFooFoo"
-
-        [ Foo, Bar ] ->
-            "FooBar"
-
-        [ Foo, Baz ] ->
-            "FooBaz"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        [ Bar, Bar ] ->
-            "BarBar"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        [ Baz ] ->
-            "Baz"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        [Foo] -> "Foo"
+        [Foo, Foo] -> "FooFoo"
+        [Foo, Foo, Foo] -> "FooFooFoo"
+        [Foo, Bar] -> "FooBar"
+        [Foo, Baz] -> "FooBaz"
+        [Bar] -> "Bar"
+        [Bar, Foo] -> "BarFoo"
+        [Bar, Bar] -> "BarBar"
+        [Bar, Baz] -> "BarBaz"
+        [Baz] -> "Baz"
+        _ -> "Too many..."
 """
                         ]
         , test "with mixed list/uncons in length-first order" <|
@@ -2125,41 +1994,18 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        [] ->
-            ""
-
-        Foo :: [] ->
-            "Foo"
-
-        Foo :: _ ->
-            "Foo+"
-
-        [ Bar ] ->
-            "Bar"
-
-        [ Bar, Foo ] ->
-            "BarFoo"
-
-        Bar :: Bar :: [] ->
-            "BarBar"
-
-        Bar :: Bar :: _ ->
-            "BarBar+"
-
-        [ Bar, Baz ] ->
-            "BarBaz"
-
-        Bar :: _ :: _ ->
-            "Bar++"
-
-        Bar :: _ ->
-            "Bar+"
-
-        [ Baz ] ->
-            "Baz"
-
-        _ ->
-            "Too many..."
+        [] -> ""
+        Foo :: [] -> "Foo"
+        Foo :: _ -> "Foo+"
+        [Bar] -> "Bar"
+        [Bar, Foo] -> "BarFoo"
+        Bar :: Bar :: [] -> "BarBar"
+        Bar :: Bar :: _ -> "BarBar+"
+        [Bar, Baz] -> "BarBaz"
+        Bar :: _ :: _ -> "Bar++"
+        Bar :: _ -> "Bar+"
+        [Baz] -> "Baz"
+        _ -> "Too many..."
 """ ]
         ]
 
@@ -2193,14 +2039,9 @@ type Custom = Foo | Bar | Baz
 toString : List Custom -> String
 toString xs =
     case xs of
-        Foo :: _ ->
-            "Foo"
-
-        Bar :: _ ->
-            "Bar"
-
-        Baz :: _ ->
-            "Baz"
+        Foo :: _ -> "Foo"
+        Bar :: _ -> "Bar"
+        Baz :: _ -> "Baz"
 """
                         ]
         , test "is not sorted including tuples" <|
@@ -2229,14 +2070,9 @@ type Custom = Foo | Bar | Baz
 toString : List (Custom, Int) -> String
 toString xs =
     case xs of
-        ( Foo, 1 ) :: ( Foo, 2 ) :: _ ->
-            "Foo"
-
-        ( Bar, 1 ) :: ( Bar, 2 ) :: _ ->
-            "Bar"
-
-        ( Baz, 1 ) :: ( Baz, 2 ) :: _ ->
-            "Baz"
+        (Foo, 1) :: (Foo, 2) :: _ -> "Foo"
+        (Bar, 1) :: (Bar, 2) :: _ -> "Bar"
+        (Baz, 1) :: (Baz, 2) :: _ -> "Baz"
 """
                         ]
         ]
@@ -2269,25 +2105,15 @@ toString i =
 toString : Int -> String
 toString i =
     case i of
-        0 ->
-            "0"
-
-        2 ->
-            "2"
-
-        4 ->
-            "4"
-
-        _ ->
-            "Something else..."
+        0 -> "0"
+        2 -> "2"
+        4 -> "4"
+        _ -> "Something else..."
 """
                         ]
-        , Test.skip <|
-            -- TODO upstream issue with `elm-syntax-dsl` is causing hex literals to be written invalidly
-            test "not in literal order with hex ints"
-            <|
-                \() ->
-                    """module A exposing (..)
+        , test "not in literal order with hex ints" <|
+            \() ->
+                """module A exposing (..)
 
 toString : Int -> String
 toString i =
@@ -2297,9 +2123,9 @@ toString i =
         0xF -> "F"
         _ -> "Something else..."
 """
-                        |> Review.Test.run (rule { defaults | sortLiterals = True })
-                        |> Review.Test.expectErrors
-                            [ unsortedError """case i of
+                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case i of
         0x2 -> "2"
         0x0 -> "0"
         0xF -> "F"
@@ -2308,17 +2134,10 @@ toString i =
 toString : Int -> String
 toString i =
     case i of
-        0x0 ->
-            "0"
-
-        0x2 ->
-            "2"
-
-        0xF ->
-            "F"
-
-        _ ->
-            "Something else..."
+        0x0 -> "0"
+        0x2 -> "2"
+        0xF -> "F"
+        _ -> "Something else..."
 """ ]
         , test "not in literal order with floats" <|
             \() ->
@@ -2344,17 +2163,10 @@ toString f =
 toString : Float -> String
 toString f =
     case f of
-        0 ->
-            "0"
-
-        2.3 ->
-            "2"
-
-        4 ->
-            "4"
-
-        _ ->
-            "Something else..."
+        0.0 -> "0"
+        2.3 -> "2"
+        4.0 -> "4"
+        _ -> "Something else..."
 """
                         ]
         , test "not in literal order with Strings" <|
@@ -2381,17 +2193,10 @@ toString s =
 toString : String -> Char
 toString s =
     case s of
-        "A" ->
-            'A'
-
-        "B" ->
-            'B'
-
-        "C" ->
-            'C'
-
-        _ ->
-            "Something else..."
+        "A" -> 'A'
+        "B" -> 'B'
+        "C" -> 'C'
+        _ -> "Something else..."
 """
                         ]
         , test "not in literal order with Chars" <|
@@ -2418,17 +2223,10 @@ toString c =
 toString : Char -> String
 toString c =
     case c of
-        'A' ->
-            "A"
-
-        'B' ->
-            "B"
-
-        'C' ->
-            "C"
-
-        _ ->
-            "Something else..."
+        'A' -> "A"
+        'B' -> "B"
+        'C' -> "C"
+        _ -> "Something else..."
 """
                         ]
         , test "not in literal order in combination with other types" <|
@@ -2462,24 +2260,13 @@ type Custom = Foo | Bar | Baz
 
 toString : Custom -> Int -> String
 toString c i =
-    case ( c, i ) of
-        ( Foo, 0 ) ->
-            "0"
-
-        ( Foo, 2 ) ->
-            "0"
-
-        ( Bar, 2 ) ->
-            "2"
-
-        ( Baz, 2 ) ->
-            "2"
-
-        ( _, 4 ) ->
-            "4"
-
-        _ ->
-            "Something else..."
+    case (c, i) of
+        (Foo, 0) -> "0"
+        (Foo, 2) -> "0"
+        (Bar, 2) -> "2"
+        (Baz, 2) -> "2"
+        (_, 4) -> "4"
+        _ -> "Something else..."
 """
                         ]
         , test "in literal order in combination with other types and not sorted" <|
@@ -2511,21 +2298,12 @@ type Custom = Foo | Bar | Baz
 
 toString : Custom -> Int -> String
 toString c i =
-    case ( c, i ) of
-        ( Foo, 0 ) ->
-            "0"
-
-        ( Bar, 2 ) ->
-            "2"
-
-        ( Baz, 2 ) ->
-            "2"
-
-        ( _, 4 ) ->
-            "4"
-
-        _ ->
-            "Something else..."
+    case (c, i) of
+        (Foo, 0) -> "0"
+        (Bar, 2) -> "2"
+        (Baz, 2) -> "2"
+        (_, 4) -> "4"
+        _ -> "Something else..."
 """
                         ]
         ]
@@ -2554,11 +2332,8 @@ toString b =
 toString : Bool -> String
 toString b =
     case b of
-        True ->
-            "True"
-
-        False ->
-            "False"
+        True -> "True"
+        False -> "False"
 """
                         ]
         , test "in declaration order with alphabetical sorting" <|
@@ -2581,11 +2356,8 @@ toString b =
 toString : Bool -> String
 toString b =
     case b of
-        False ->
-            "False"
-
-        True ->
-            "True"
+        False -> "False"
+        True -> "True"
 """
                         ]
         ]
@@ -2622,17 +2394,10 @@ type Custom = Foo | Bar | Baz
 toString : Maybe Custom -> String
 toString custom =
     case custom of
-        Just Foo ->
-            "Foo"
-
-        Just Bar ->
-            "Bar"
-
-        Just Baz ->
-            "Baz"
-
-        Nothing ->
-            "Nothing"
+        Just Foo -> "Foo"
+        Just Bar -> "Bar"
+        Just Baz -> "Baz"
+        Nothing -> "Nothing"
 """
                         ]
         , test "not sorted at lower level" <|
@@ -2662,17 +2427,10 @@ type Custom = Foo | Bar | Baz
 toString : Maybe Custom -> String
 toString custom =
     case custom of
-        Just Foo ->
-            "Foo"
-
-        Just Bar ->
-            "Bar"
-
-        Just Baz ->
-            "Baz"
-
-        Nothing ->
-            "Nothing"
+        Just Foo -> "Foo"
+        Just Bar -> "Bar"
+        Just Baz -> "Baz"
+        Nothing -> "Nothing"
 """ ]
         , test "with non-sortable patterns" <|
             \() ->
@@ -2704,14 +2462,9 @@ type Custom = Foo | Bar | Baz
 toString : Container -> String
 toString c =
     case c of
-        Container Foo 1 2 ->
-            "Foo"
-
-        Container Bar 2 1 ->
-            "Bar"
-
-        Container Baz 2 2 ->
-            "Baz"
+        Container Foo 1 2 -> "Foo"
+        Container Bar 2 1 -> "Bar"
+        Container Baz 2 2 -> "Baz"
 """
                         ]
         ]
