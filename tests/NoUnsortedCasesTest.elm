@@ -1,6 +1,14 @@
 module NoUnsortedCasesTest exposing (all)
 
-import NoUnsortedCases exposing (SortLists(..), SortTypesFromDependencies(..), defaults, rule)
+import NoUnsortedCases
+    exposing
+        ( defaults
+        , doNotSortLiterals
+        , doNotSortTypesFromDependencies
+        , rule
+        , sortListPatternsByLength
+        , sortTypesFromDependenciesAlphabetically
+        )
 import Review.Test
 import Test exposing (Test, describe, test)
 
@@ -410,7 +418,11 @@ toString xs =
         [Foo, Foo, Foo] -> "FooFooFoo"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = LengthFirst })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortListPatternsByLength
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         , test "is sorted with mixed list/uncons" <|
             \() ->
@@ -434,7 +446,11 @@ toString xs =
         Bar :: _ -> "Bar+"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = LengthFirst })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortListPatternsByLength
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         ]
 
@@ -464,7 +480,7 @@ toString xs =
         [Baz] -> "Baz"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = Elementwise })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
         , test "is sorted with mixed list/uncons" <|
             \() ->
@@ -492,7 +508,7 @@ toString xs =
         [Baz] -> "Baz"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = Elementwise })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
         ]
 
@@ -548,7 +564,7 @@ toString i =
         4 -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
         , test "in literal order in combination with other types" <|
             \() ->
@@ -566,7 +582,7 @@ toString c i =
         (_, 4) -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
         ]
 
@@ -584,7 +600,7 @@ toString b =
         True -> "True"
         False -> "False"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = DeclarationOrder })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
         , test "is sorted in alphabetical order" <|
             \() ->
@@ -596,7 +612,11 @@ toString b =
         False -> "False"
         True -> "True"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = AlphabeticalOrder })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortTypesFromDependenciesAlphabetically
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         , test "in any order when not sorting" <|
             \() ->
@@ -614,7 +634,11 @@ toString2 b =
         True -> "True"
         False -> "False"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = DoNotSort })
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotSortTypesFromDependencies
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         ]
 
@@ -636,7 +660,11 @@ toString custom =
         Just Baz -> "Baz"
         Nothing -> "Nothing"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = AlphabeticalOrder })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortTypesFromDependenciesAlphabetically
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         , test "with non-sortable patterns" <|
             \() ->
@@ -653,7 +681,11 @@ toString c =
         Container Bar 2 1 -> "Bar"
         Container Baz 2 2 -> "Baz"
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = False })
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotSortLiterals
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         , test "cannot sort past non-sortable patterns" <|
             \() ->
@@ -670,7 +702,11 @@ toString c =
         Container 1 Foo 1 -> "Foo"
         Container 1 Bar 1 -> "Bar"
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = False })
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotSortLiterals
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         ]
 
@@ -1661,7 +1697,11 @@ toString xs =
         [Foo, Foo, Foo] -> "FooFooFoo"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = LengthFirst })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortListPatternsByLength
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -1720,7 +1760,11 @@ toString xs =
         [Baz] -> "Baz"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = LengthFirst })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortListPatternsByLength
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -1783,7 +1827,11 @@ toString xs =
         [Baz] -> "Baz"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = LengthFirst })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortListPatternsByLength
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -1855,7 +1903,7 @@ toString xs =
         [Bar, Baz] -> "BarBaz"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = Elementwise })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -1914,7 +1962,7 @@ toString xs =
         [Foo, Foo, Foo] -> "FooFooFoo"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = Elementwise })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -1973,7 +2021,7 @@ toString xs =
         Bar :: _ -> "Bar+"
         _ -> "Too many..."
 """
-                    |> Review.Test.run (rule { defaults | sortLists = Elementwise })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case xs of
         [] -> ""
@@ -2093,7 +2141,7 @@ toString i =
         4 -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case i of
         2 -> "2"
@@ -2123,7 +2171,7 @@ toString i =
         0xF -> "F"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case i of
         0x2 -> "2"
@@ -2151,7 +2199,7 @@ toString f =
         4.0 -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case f of
         2.3 -> "2"
@@ -2181,7 +2229,7 @@ toString s =
         "B" -> 'B'
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case s of
         "A" -> 'A'
@@ -2211,7 +2259,7 @@ toString c =
         'B' -> "B"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case c of
         'A' -> "A"
@@ -2245,7 +2293,7 @@ toString c i =
         (_, 4) -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case (c, i) of
         (Foo, 2) -> "0"
@@ -2284,7 +2332,7 @@ toString c i =
         (_, 4) -> "4"
         _ -> "Something else..."
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = True })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case (c, i) of
         (Foo, 0) -> "0"
@@ -2322,7 +2370,7 @@ toString b =
         False -> "False"
         True -> "True"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = DeclarationOrder })
+                    |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError """case b of
         False -> "False"
@@ -2346,7 +2394,11 @@ toString b =
         True -> "True"
         False -> "False"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = AlphabeticalOrder })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortTypesFromDependenciesAlphabetically
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case b of
         True -> "True"
@@ -2380,7 +2432,11 @@ toString custom =
         Just Bar -> "Bar"
         Just Baz -> "Baz"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = AlphabeticalOrder })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortTypesFromDependenciesAlphabetically
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case custom of
         Nothing -> "Nothing"
@@ -2414,7 +2470,11 @@ toString custom =
         Just Baz -> "Baz"
         Nothing -> "Nothing"
 """
-                    |> Review.Test.run (rule { defaults | sortTypesFromDependencies = AlphabeticalOrder })
+                    |> Review.Test.run
+                        (defaults
+                            |> sortTypesFromDependenciesAlphabetically
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case custom of
         Just Bar -> "Bar"
@@ -2447,7 +2507,11 @@ toString c =
         Container Foo 1 2 -> "Foo"
         Container Baz 2 2 -> "Baz"
 """
-                    |> Review.Test.run (rule { defaults | sortLiterals = False })
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotSortLiterals
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ unsortedError """case c of
         Container Bar 2 1 -> "Bar"

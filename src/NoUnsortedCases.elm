@@ -1,6 +1,6 @@
 module NoUnsortedCases exposing
     ( rule
-    , RuleConfig, defaults, SortLists(..), SortTypesFromDependencies(..)
+    , RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength
     )
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -159,7 +159,8 @@ are sorted.
 
 This rule is not useful when you want to be able to write case patterns in
 different orders throughout your codebase, e.g. if you want to emphasize what
-pattern is most important at any given point.
+pattern is most important at any given point or glean a tiny bit of performance
+out of matching the more commonly-expected patterns first.
 
 
 ## Try it out
@@ -178,7 +179,7 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example --rules NoUnsor
 
 ## Configuration
 
-@docs RuleConfig, defaults, SortLists, SortTypesFromDependencies
+@docs RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength
 
 -}
 
@@ -218,25 +219,15 @@ rule config =
         |> Rule.fromProjectRuleSchema
 
 
-{-| Configure the behavior of the rule.
-
-  - `sortLists` -- How to sort list and uncons patterns. See `SortLists` for
-    details.
-  - `sortLiterals` -- Specify whether to sort literals or not. If literals are
-    not sorted, case expressions that would require sorting literals cannot be
-    sorted and will thus be ignored by the rule.
-  - `sortTypesFromDependencies` -- Specify how to sort custom types imported
-    from dependencies (including `Basics` types like `Maybe` and `Bool`). If
-    such types are not sorted, case expressions that would require sorting such
-    types in cannot be sorted, and will thus be ignored by the rule. See
-    `SortTypesFromDependencies` for details.
-
+{-| Configuration for this rule. Create a new one with `defaults` and use
+`doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter it.
 -}
-type alias RuleConfig =
-    { sortLists : SortLists
-    , sortLiterals : Bool
-    , sortTypesFromDependencies : SortTypesFromDependencies
-    }
+type RuleConfig
+    = RuleConfig
+        { sortLists : SortLists
+        , sortLiterals : Bool
+        , sortTypesFromDependencies : SortTypesFromDependencies
+        }
 
 
 {-| List patterns may be sorted in one of two ways:
@@ -244,6 +235,73 @@ type alias RuleConfig =
   - `Elementwise` -- Patterns are sorted by comparing elements sequentially at each position (from left to right). This is the same behavior as
     `List.sort`.
   - `LengthFirst` -- Shorter patterns always come before longer pattern, with patterns of the same length sorted elementwise at each position.
+
+-}
+type SortLists
+    = Elementwise
+    | LengthFirst
+
+
+{-| Specify how to sort types that are **imported from dependencies**.
+
+  - `DeclarationOrder` -- Sort types in the order they appear in the
+    dependency's source file (or more technically in its documentation); this is
+    identical to the behavior of types defined within your own modules.
+  - `AlphabeticalOrder` -- Sort types alphabetically.
+  - `DoNotSort` -- Do not sort types from dependencies at all. Note that this
+    will render unsortable any patterns requiring types from dependencies to be
+    sorted.
+
+-}
+type SortTypesFromDependencies
+    = DeclarationOrder
+    | AlphabeticalOrder
+    | DoNotSort
+
+
+{-| The default configuration, with the following behavior:
+
+  - Literal patterns (`String`, `Int`, etc.) are sorted in the natural order for their type.
+
+  - Types imported from dependencies are sorted in declaration order, i.e. in the order they appear in the dependency's source file (or more technically in its documentation); this is identical to the behavior of types defined within your own modules.
+
+  - Lists are sorted elementwise, by comparing the elements sequentially at each
+    position (from left to right).
+
+Use `doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter this behavior, e.g.
+
+    config =
+        [ NoUnsortedCases.defaults
+            |> NoUnsortedCases.doNotSortLiterals
+            |> NoUnsortedCases.sortListPatternsByLength
+            |> NoUnsortedCases.rule
+        ]
+
+-}
+defaults : RuleConfig
+defaults =
+    RuleConfig
+        { sortLists = Elementwise
+        , sortLiterals = True
+        , sortTypesFromDependencies = DeclarationOrder
+        }
+
+
+{-| Change the behavior of the rule to **not** sort literal patterns. If
+literals are not sorted, case expressions that would require sorting literals
+cannot be sorted and will thus be ignored by the rule.
+-}
+doNotSortLiterals : RuleConfig -> RuleConfig
+doNotSortLiterals (RuleConfig c) =
+    RuleConfig { c | sortLiterals = False }
+
+
+{-| List patterns may be sorted in one of two ways:
+
+  - Elementwise (**default**) -- Patterns are sorted by comparing elements
+    sequentially at each position (from left to right). This is the same
+    behavior as `List.sort` (which is why it is the default).
+  - Length First -- Shorter patterns always come before longer pattern, with patterns of the same length sorted elementwise at each position.
 
 Note that uncons patterns are considered the length of their matching list, with
 wildcard patterns considered to have infinite length for the purposes of
@@ -289,7 +347,7 @@ matched by wildcards.
         _ ->
             "Too many..."
 
-**LengthFirst**
+**Length First**
 
     case list of
         [] ->
@@ -329,44 +387,24 @@ matched by wildcards.
             "Too many..."
 
 -}
-type SortLists
-    = Elementwise
-    | LengthFirst
+sortListPatternsByLength : RuleConfig -> RuleConfig
+sortListPatternsByLength (RuleConfig c) =
+    RuleConfig { c | sortLists = LengthFirst }
 
 
-{-| Specify how to sort types that are **imported from dependencies**.
-
-  - `DeclarationOrder` -- Sort types in the order they appear in the
-    dependency's source file (or more technically in its documentation); this is
-    identical to the behavior of types those defined within your own modules.
-  - `AlphabeticalOrder` -- Sort types alphabetically.
-  - `DoNotSort` -- Do not sort types from dependencies at all. Note that this
-    will render unsortable any patterns requiring types from dependencies to be
-    sorted.
-
+{-| Sort custom types imported from dependencies (including `Basics` types like `Maybe` and `Bool`) alphabetically, rather than by their source order in the dependency's source code.
 -}
-type SortTypesFromDependencies
-    = DeclarationOrder
-    | AlphabeticalOrder
-    | DoNotSort
+sortTypesFromDependenciesAlphabetically : RuleConfig -> RuleConfig
+sortTypesFromDependenciesAlphabetically (RuleConfig c) =
+    RuleConfig { c | sortTypesFromDependencies = AlphabeticalOrder }
 
 
-{-| A default configuration, defined as follows:
-
-    { sortLists = Elementwise
-    , sortLiterals = True
-    , sortTypesFromDependencies = DeclarationOrder
-    }
-
-See the appropriate sections for a description of each option.
-
+{-| Do not sort types from dependencies at all. Note that this will render
+unsortable any patterns requiring types from dependencies to be sorted.
 -}
-defaults : RuleConfig
-defaults =
-    { sortLists = Elementwise
-    , sortLiterals = True
-    , sortTypesFromDependencies = DeclarationOrder
-    }
+doNotSortTypesFromDependencies : RuleConfig -> RuleConfig
+doNotSortTypesFromDependencies (RuleConfig c) =
+    RuleConfig { c | sortTypesFromDependencies = DoNotSort }
 
 
 
@@ -539,7 +577,7 @@ foldProjectContexts newContext prevContext =
 {-| Visit all dependencies and store type order from them.
 -}
 dependencyVisitor : RuleConfig -> Dict String Dependency -> ProjectContext -> ( List (Error { useErrorForModule : () }), ProjectContext )
-dependencyVisitor config deps context =
+dependencyVisitor (RuleConfig config) deps context =
     let
         docToEntry : Elm.Docs.Union -> ( String, { constructors : Set String, declarationOrder : List String } )
         docToEntry { name, tags } =
@@ -684,11 +722,11 @@ expressionVisitor config node context =
 how to sort, if possible.
 -}
 getSortablePattern : RuleConfig -> ModuleContext -> Node Pattern -> Maybe SortablePattern
-getSortablePattern config context node =
+getSortablePattern ((RuleConfig config) as ruleConfig) context node =
     let
         go : Node Pattern -> Maybe SortablePattern
         go =
-            getSortablePattern config context
+            getSortablePattern ruleConfig context
 
         n : Node Pattern
         n =
@@ -841,11 +879,11 @@ compareLiteral l1 l2 =
 {-| Compare two sortable patterns, determining their order (if not a type error).
 -}
 comparePatterns : RuleConfig -> SortablePattern -> SortablePattern -> Order
-comparePatterns config pat1 pat2 =
+comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
     let
         go : SortablePattern -> SortablePattern -> () -> Order
         go p1 p2 =
-            \() -> comparePatterns config p1 p2
+            \() -> comparePatterns ruleConfig p1 p2
     in
     case ( pat1, pat2 ) of
         -- Wildcards cannot be moved relative to non-wildcards, so return EQ which ensures index is used.
