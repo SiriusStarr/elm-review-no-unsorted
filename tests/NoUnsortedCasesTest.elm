@@ -3,6 +3,7 @@ module NoUnsortedCasesTest exposing (all)
 import NoUnsortedCases
     exposing
         ( defaults
+        , doNotLookPastUnsortable
         , doNotSortLiterals
         , doNotSortTypesFromDependencies
         , rule
@@ -687,7 +688,7 @@ toString c =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
-        , test "cannot sort past non-sortable patterns" <|
+        , test "does not sort past non-sortable patterns when specified" <|
             \() ->
                 """module A exposing (..)
 
@@ -705,6 +706,7 @@ toString c =
                     |> Review.Test.run
                         (defaults
                             |> doNotSortLiterals
+                            |> doNotLookPastUnsortable
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -2529,6 +2531,45 @@ toString c =
         Container Foo 1 2 -> "Foo"
         Container Bar 2 1 -> "Bar"
         Container Baz 2 2 -> "Baz"
+"""
+                        ]
+        , test "sorts past non-sortable patterns" <|
+            \() ->
+                """module A exposing (..)
+
+type Container = Container Int {field : Bool} Custom Int
+
+type Custom = Foo | Bar | Baz
+
+toString : Container -> String
+toString c =
+    case c of
+        Container 1 {field} Baz 1 -> "Baz"
+        Container 1 {field} Foo 1 -> "Foo"
+        Container 1 {field} Bar 1 -> "Bar"
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotSortLiterals
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case c of
+        Container 1 {field} Baz 1 -> "Baz"
+        Container 1 {field} Foo 1 -> "Foo"
+        Container 1 {field} Bar 1 -> "Bar\""""
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Container = Container Int {field : Bool} Custom Int
+
+type Custom = Foo | Bar | Baz
+
+toString : Container -> String
+toString c =
+    case c of
+        Container 1 {field} Foo 1 -> "Foo"
+        Container 1 {field} Bar 1 -> "Bar"
+        Container 1 {field} Baz 1 -> "Baz"
 """
                         ]
         ]

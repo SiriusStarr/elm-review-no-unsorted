@@ -1,6 +1,6 @@
 module NoUnsortedCases exposing
     ( rule
-    , RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength
+    , RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
     )
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -179,7 +179,7 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example --rules NoUnsor
 
 ## Configuration
 
-@docs RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength
+@docs RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
 
 -}
 
@@ -224,7 +224,8 @@ rule config =
 -}
 type RuleConfig
     = RuleConfig
-        { sortLists : SortLists
+        { lookPastUnsortable : Bool
+        , sortLists : SortLists
         , sortLiterals : Bool
         , sortTypesFromDependencies : SortTypesFromDependencies
         }
@@ -268,7 +269,36 @@ type SortTypesFromDependencies
   - Lists are sorted elementwise, by comparing the elements sequentially at each
     position (from left to right).
 
-Use `doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter this behavior, e.g.
+  - Unsortable patterns can be looked beyond to resolve ties, for example:
+
+```
+func custom =
+    case custom of
+        Container { field } Bar ->
+            not field
+
+        Container { field } Baz ->
+            field
+
+        Container { field } Foo ->
+            field
+```
+
+will be sorted to
+
+    func custom =
+        case custom of
+            Container { field } Foo ->
+                field
+
+            Container { field } Bar ->
+                not field
+
+            Container { field } Baz ->
+                field
+
+Use `doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter any of this
+behavior, e.g.
 
     config =
         [ NoUnsortedCases.defaults
@@ -281,7 +311,8 @@ Use `doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter this behavior
 defaults : RuleConfig
 defaults =
     RuleConfig
-        { sortLists = Elementwise
+        { lookPastUnsortable = True
+        , sortLists = Elementwise
         , sortLiterals = True
         , sortTypesFromDependencies = DeclarationOrder
         }
@@ -405,6 +436,25 @@ unsortable any patterns requiring types from dependencies to be sorted.
 doNotSortTypesFromDependencies : RuleConfig -> RuleConfig
 doNotSortTypesFromDependencies (RuleConfig c) =
     RuleConfig { c | sortTypesFromDependencies = DoNotSort }
+
+
+{-| Do not look beyond unsortable patterns, rendering the following unsortable:
+
+    func custom =
+        case custom of
+            Container { field } Bar ->
+                not field
+
+            Container { field } Baz ->
+                field
+
+            Container { field } Foo ->
+                field
+
+-}
+doNotLookPastUnsortable : RuleConfig -> RuleConfig
+doNotLookPastUnsortable (RuleConfig c) =
+    RuleConfig { c | lookPastUnsortable = False }
 
 
 
@@ -906,6 +956,14 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
                         ( (Just p1) :: p1s, (Just p2) :: p2s ) ->
                             goSubs p1s p2s
                                 |> fallbackCompareFor (go p1 p2 ())
+
+                        ( Nothing :: p1s, Nothing :: p2s ) ->
+                            -- If at the point where arguments are both unsortable, then proceed past if configured to
+                            if config.lookPastUnsortable then
+                                goSubs p1s p2s ()
+
+                            else
+                                EQ
 
                         _ ->
                             -- Lists should be even, so other cases aren't sortable
