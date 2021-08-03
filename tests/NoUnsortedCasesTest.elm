@@ -8,6 +8,7 @@ import NoUnsortedCases
         , doNotSortTypesFromDependencies
         , rule
         , sortListPatternsByLength
+        , sortOnlyMatchingTypes
         , sortTypesFromDependenciesAlphabetically
         )
 import Review.Test
@@ -47,6 +48,7 @@ toString custom =
         , passesLiterals
         , passesTypesFromDependencies
         , passesSubpatterns
+        , passesNotOnWhitelist
         ]
 
 
@@ -768,6 +770,213 @@ toString c =
         ]
 
 
+passesNotOnWhitelist : Test
+passesNotOnWhitelist =
+    describe "not on whitelist"
+        [ test "not sorted" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+import A exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "B", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "with qualified names" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+import A
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Bar -> "Bar"
+        A.Foo -> "Foo"
+        A.Baz -> "Baz"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "B", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "with qualified names disambiguating" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module C exposing (..)
+
+import A
+import B
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Bar -> "Bar"
+        A.Foo -> "Foo"
+        A.Baz -> "Baz"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "B", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "with disambiguation by import" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module C exposing (..)
+
+import A
+import B exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Bar -> "Bar"
+        Foo -> "Foo"
+        Baz -> "Baz"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "with local name" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module B exposing (..)
+
+import A
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Bar -> "Bar"
+        Foo -> "Foo"
+        Baz -> "Baz"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "with import name" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Bool -> Custom -> String
+toString b custom =
+    case (b, custom) of
+        (False, Bar) -> "Bar"
+        (False, Foo) -> "Foo"
+        (True, Foo) -> "Foo"
+        (False, Baz) -> "Baz"
+        _ -> "Rest"
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        ]
+
+
 fails : Test
 fails =
     describe "reports an error when"
@@ -812,6 +1021,7 @@ toString custom =
         , failsLiterals
         , failsTypesFromDependencies
         , failsSubpatterns
+        , failsOnWhitelist
         ]
 
 
@@ -2627,6 +2837,388 @@ toString c =
         Container 1 {field} Baz 1 -> "Baz"
 """
                         ]
+        ]
+
+
+failsOnWhitelist : Test
+failsOnWhitelist =
+    describe "on whitelist"
+        [ test "not sorted" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+import A exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ unsortedError """case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
+"""
+                            ]
+                          )
+                        ]
+        , test "with qualified names" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+import A
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Baz -> "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ unsortedError """case custom of
+        A.Baz -> "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+        A.Baz -> "Baz"
+"""
+                            ]
+                          )
+                        ]
+        , test "with qualified names disambiguating" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module C exposing (..)
+
+import A
+import B
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Baz -> "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "C"
+                          , [ unsortedError """case custom of
+        A.Baz -> "Baz"
+        A.Foo -> "Foo"
+        A.Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module C exposing (..)
+
+import A
+import B
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        A.Foo -> "Foo"
+        A.Bar -> "Bar"
+        A.Baz -> "Baz"
+"""
+                            ]
+                          )
+                        ]
+        , test "with disambiguation by import" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module C exposing (..)
+
+import A
+import B exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "B", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "C"
+                          , [ unsortedError """case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module C exposing (..)
+
+import A
+import B exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Baz -> "Baz"
+        Bar -> "Bar"
+        Foo -> "Foo"
+"""
+                            ]
+                          )
+                        ]
+        , test "with local name" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module B exposing (..)
+
+import A
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "B", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ unsortedError """case custom of
+        Baz -> "Baz"
+        Foo -> "Foo"
+        Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
+"""
+                            ]
+                          )
+                        ]
+        , test "with sub module" <|
+            \() ->
+                [ """module A.C.Internal exposing (..)
+
+type Custom = Baz | Bar | Foo
+"""
+                , """module B exposing (..)
+
+import A.C.Internal as X
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        X.Baz -> "Baz"
+        X.Foo -> "Foo"
+        X.Bar -> "Bar"
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A.C.Internal", "Custom" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ unsortedError """case custom of
+        X.Baz -> "Baz"
+        X.Foo -> "Foo"
+        X.Bar -> "Bar\""""
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A.C.Internal as X
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        X.Baz -> "Baz"
+        X.Bar -> "Bar"
+        X.Foo -> "Foo"
+"""
+                            ]
+                          )
+                        ]
+        , test "with import name" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Bool -> Custom -> String
+toString b custom =
+    case (b, custom) of
+        (False, Bar) -> "Bar"
+        (False, Foo) -> "Foo"
+        (True, Foo) -> "Foo"
+        (False, Baz) -> "Baz"
+        _ -> "Rest"
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> sortOnlyMatchingTypes
+                                (\m t ->
+                                    case ( m, t ) of
+                                        ( "A", "Custom" ) ->
+                                            True
+
+                                        ( "Basics", "Bool" ) ->
+                                            True
+
+                                        _ ->
+                                            False
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError """case (b, custom) of
+        (False, Bar) -> "Bar"
+        (False, Foo) -> "Foo"
+        (True, Foo) -> "Foo"
+        (False, Baz) -> "Baz"
+        _ -> "Rest\"""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Custom = Foo | Bar | Baz
+
+toString : Bool -> Custom -> String
+toString b custom =
+    case (b, custom) of
+        (True, Foo) -> "Foo"
+        (False, Foo) -> "Foo"
+        (False, Bar) -> "Bar"
+        (False, Baz) -> "Baz"
+        _ -> "Rest"
+""" ]
         ]
 
 

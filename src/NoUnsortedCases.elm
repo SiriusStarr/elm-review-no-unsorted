@@ -1,6 +1,6 @@
 module NoUnsortedCases exposing
     ( rule
-    , RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
+    , RuleConfig, defaults, sortOnlyMatchingTypes, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
     )
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -179,7 +179,7 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example --rules NoUnsor
 
 ## Configuration
 
-@docs RuleConfig, defaults, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
+@docs RuleConfig, defaults, sortOnlyMatchingTypes, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
 
 -}
 
@@ -228,6 +228,7 @@ type RuleConfig
         , sortLists : SortLists
         , sortLiterals : Bool
         , sortTypesFromDependencies : SortTypesFromDependencies
+        , sortablePredicate : String -> String -> Bool
         }
 
 
@@ -261,6 +262,9 @@ type SortTypesFromDependencies
 
 
 {-| The default configuration, with the following behavior:
+
+  - All custom types are sorted. (This can be restricted by using
+    `sortOnlyMatchingTypes`.)
 
   - Literal patterns (`String`, `Int`, etc.) are sorted in the natural order for their type.
 
@@ -315,7 +319,74 @@ defaults =
         , sortLists = Elementwise
         , sortLiterals = True
         , sortTypesFromDependencies = DeclarationOrder
+        , sortablePredicate = \_ _ -> True
         }
+
+
+{-| Restrict custom type sorting to only those matching a provided predicate.
+This function takes two strings, the first being the full module name of a type,
+e.g. `"Review.Rule"` and the second being the name of a type, e.g. `"Rule"`, and
+returns a `Bool` indicating whether the type should be sorted (with `True`
+meaning sortable). For example:
+
+Module Foo:
+
+    module Foo exposing (Foo(..))
+
+    type Foo
+        = Foo
+        | Bar
+        | Baz
+
+Module Main:
+
+    module Main exposing (..)
+
+    type Msg
+        = ButtonPressed
+        | ButtonClicked
+
+Module ReviewConfig:
+
+    onlyMsg moduleName typeName =
+        case ( moduleName, typeName ) of
+            ( "Main", "Msg" ) ->
+                True
+
+            _ ->
+                False
+
+    config =
+        [ NoUnsortedCases.defaults
+            |> NoUnsortedCases.sortOnlyMatchingTypes onlyMsg
+            |> NoUnsortedCases.rule
+        ]
+
+will sort the following pattern:
+
+    case msg of
+        ButtonClicked ->
+            ( { model | clicked = True }, Cmd.none )
+
+        ButtonPressed ->
+            ( { model | pressed = True }, Cmd.none )
+
+but will not sort:
+
+    case foo of
+        Bar ->
+            "bar"
+
+        Baz ->
+            "baz"
+
+        Foo ->
+            "foo"
+
+-}
+sortOnlyMatchingTypes : (String -> String -> Bool) -> RuleConfig -> RuleConfig
+sortOnlyMatchingTypes sortablePredicate (RuleConfig c) =
+    RuleConfig { c | sortablePredicate = sortablePredicate }
 
 
 {-| Change the behavior of the rule to **not** sort literal patterns. If
@@ -491,6 +562,7 @@ type alias ModuleContext =
                 }
             )
     , lookupTable : ModuleNameLookupTable
+    , moduleName : String
     , extractSourceCode : Range -> String
     }
 
@@ -582,7 +654,7 @@ checking all expressions for `case`s.
 moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema schemaState ModuleContext -> Rule.ModuleRuleSchema { schemaState | hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withDeclarationListVisitor declarationListVisitor
+        |> Rule.withDeclarationListVisitor (declarationListVisitor config)
         |> Rule.withExpressionEnterVisitor (expressionVisitor config)
 
 
@@ -615,14 +687,16 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor projectContext ->
+        (\lookupTable sourceCodeExtractor metadata projectContext ->
             { customTypes = projectContext.customTypes
             , lookupTable = lookupTable
+            , moduleName = String.join "." <| Rule.moduleNameFromMetadata metadata
             , extractSourceCode = sourceCodeExtractor
             }
         )
         |> Rule.withModuleNameLookupTable
         |> Rule.withSourceCodeExtractor
+        |> Rule.withMetadata
 
 
 {-| Combine `ProjectContext`s by taking the union of known type orders.
@@ -643,36 +717,50 @@ foldProjectContexts newContext prevContext =
 dependencyVisitor : RuleConfig -> Dict String Dependency -> ProjectContext -> ( List (Error { useErrorForModule : () }), ProjectContext )
 dependencyVisitor (RuleConfig config) deps context =
     let
-        docToEntry : Elm.Docs.Union -> ( String, { constructors : Set String, declarationOrder : List String } )
-        docToEntry { name, tags } =
+        docToEntry : String -> Elm.Docs.Union -> Maybe ( String, { constructors : Set String, declarationOrder : List String } )
+        docToEntry moduleName { name, tags } =
             let
                 constructors : List String
                 constructors =
                     List.map Tuple.first tags
             in
-            ( name
-            , { constructors = Set.fromList constructors
-              , declarationOrder =
-                    case config.sortTypesFromDependencies of
-                        AlphabeticalOrder ->
-                            ListX.stableSortWith compare constructors
+            if config.sortablePredicate moduleName name then
+                Just
+                    ( name
+                    , { constructors = Set.fromList constructors
+                      , declarationOrder =
+                            case config.sortTypesFromDependencies of
+                                AlphabeticalOrder ->
+                                    ListX.stableSortWith compare constructors
 
-                        _ ->
-                            constructors
-              }
-            )
+                                _ ->
+                                    constructors
+                      }
+                    )
+
+            else
+                Nothing
     in
     if config.sortTypesFromDependencies /= DoNotSort then
         Dict.foldl
             (\_ dep acc ->
                 Dependency.modules dep
-                    |> List.map
+                    |> List.filterMap
                         (\{ name, unions } ->
-                            ( -- Convert to a `ModuleName`
-                              String.split "." name
-                            , List.map docToEntry unions
+                            List.filterMap (docToEntry name) unions
                                 |> Dict.fromList
-                            )
+                                |> (\ts ->
+                                        if Dict.isEmpty ts then
+                                            Nothing
+
+                                        else
+                                            Just ts
+                                   )
+                                |> Maybe.map
+                                    (Tuple.pair
+                                        -- Convert to a `ModuleName`
+                                        (String.split "." name)
+                                    )
                         )
                     |> Dict.fromList
                     |> (\types -> { acc | customTypes = Dict.union types acc.customTypes })
@@ -691,14 +779,18 @@ dependencyVisitor (RuleConfig config) deps context =
 
 {-| Visit declarations, storing custom type orders.
 -}
-declarationListVisitor : List (Node Declaration) -> ModuleContext -> ( List nothing, ModuleContext )
-declarationListVisitor declarations context =
+declarationListVisitor : RuleConfig -> List (Node Declaration) -> ModuleContext -> ( List nothing, ModuleContext )
+declarationListVisitor (RuleConfig config) declarations context =
     let
         getCustomType : Node Declaration -> Maybe Type
         getCustomType node =
             case Node.value node of
-                Declaration.CustomTypeDeclaration type_ ->
-                    Just type_
+                Declaration.CustomTypeDeclaration ({ name } as type_) ->
+                    if config.sortablePredicate context.moduleName (Node.value name) then
+                        Just type_
+
+                    else
+                        Nothing
 
                 _ ->
                     Nothing
@@ -716,17 +808,23 @@ declarationListVisitor declarations context =
     -- Find custom types that were defined in the module, and store them in the context.
     { context
         | customTypes =
-            Dict.insert []
-                (List.filterMap getCustomType declarations
-                    |> List.map
-                        (\type_ ->
-                            ( Node.value type_.name
-                            , typeConstructors type_
-                            )
+            List.filterMap getCustomType declarations
+                |> List.map
+                    (\type_ ->
+                        ( Node.value type_.name
+                        , typeConstructors type_
                         )
-                    |> Dict.fromList
-                )
-                context.customTypes
+                    )
+                |> (\ls ->
+                        -- Only insert non-empty dict
+                        if List.isEmpty ls then
+                            Nothing
+
+                        else
+                            Just ls
+                   )
+                |> Maybe.map Dict.fromList
+                |> MaybeX.unwrap context.customTypes (\v -> Dict.insert [] v context.customTypes)
     }
         |> Tuple.pair []
 
