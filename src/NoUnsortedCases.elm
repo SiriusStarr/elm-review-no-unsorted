@@ -191,7 +191,7 @@ import Elm.Syntax.Expression as Expression exposing (Expression)
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern as Pattern exposing (Pattern)
-import Elm.Syntax.Range exposing (Range)
+import Elm.Syntax.Range as Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import List.Extra as ListX
 import Maybe.Extra as MaybeX
@@ -724,22 +724,25 @@ dependencyVisitor (RuleConfig config) deps context =
                 constructors =
                     List.map Tuple.first tags
             in
-            if config.sortablePredicate moduleName name then
-                Just
-                    ( name
-                    , { constructors = Set.fromList constructors
-                      , declarationOrder =
-                            case config.sortTypesFromDependencies of
-                                AlphabeticalOrder ->
-                                    ListX.stableSortWith compare constructors
+            case ( config.sortablePredicate moduleName name, config.sortTypesFromDependencies ) of
+                ( True, AlphabeticalOrder ) ->
+                    Just
+                        ( name
+                        , { constructors = Set.fromList constructors
+                          , declarationOrder = ListX.stableSortWith compare constructors
+                          }
+                        )
 
-                                _ ->
-                                    constructors
-                      }
-                    )
+                ( True, _ ) ->
+                    Just
+                        ( name
+                        , { constructors = Set.fromList constructors
+                          , declarationOrder = constructors
+                          }
+                        )
 
-            else
-                Nothing
+                ( False, _ ) ->
+                    Nothing
     in
     if config.sortTypesFromDependencies /= DoNotSort then
         Dict.foldl
@@ -856,15 +859,20 @@ expressionVisitor config node context =
                             -- Check if sorted
                             |> (\sorted ->
                                     if List.map Tuple.first sorted /= indexed then
-                                        let
-                                            range : Range
-                                            range =
-                                                Node.range node
-                                        in
                                         -- Generate a fix if unsorted
                                         Just
-                                            ( createFix context.extractSourceCode sorted
-                                                |> unsortedError range
+                                            ( List.map
+                                                (Tuple.mapSecond
+                                                    (\( p, e ) ->
+                                                        Range.combine
+                                                            [ Node.range p
+                                                            , Node.range e
+                                                            ]
+                                                    )
+                                                )
+                                                sorted
+                                                |> createFix context.extractSourceCode
+                                                |> unsortedError (Node.range node)
                                                 |> List.singleton
                                             , context
                                             )
@@ -1073,18 +1081,14 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
             let
                 goSubs : List (Maybe SortablePattern) -> List (Maybe SortablePattern) -> () -> Order
                 goSubs pat1s pat2s () =
-                    case ( pat1s, pat2s ) of
-                        ( (Just p1) :: p1s, (Just p2) :: p2s ) ->
+                    case ( pat1s, pat2s, config.lookPastUnsortable ) of
+                        ( (Just p1) :: p1s, (Just p2) :: p2s, _ ) ->
                             goSubs p1s p2s
                                 |> fallbackCompareFor (go p1 p2)
 
-                        ( Nothing :: p1s, Nothing :: p2s ) ->
+                        ( Nothing :: p1s, Nothing :: p2s, True ) ->
                             -- If at the point where arguments are both unsortable, then proceed past if configured to
-                            if config.lookPastUnsortable then
-                                goSubs p1s p2s ()
-
-                            else
-                                EQ
+                            goSubs p1s p2s ()
 
                         _ ->
                             -- Lists should be even, so other cases aren't sortable

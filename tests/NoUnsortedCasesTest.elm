@@ -793,15 +793,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "B", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "B", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -825,15 +817,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "B", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "B", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -862,15 +846,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "B", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "B", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -899,15 +875,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -933,15 +901,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -962,15 +922,7 @@ toString b custom =
 """
                     |> Review.Test.run
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
@@ -2863,15 +2815,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -2914,15 +2858,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -2970,15 +2906,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -3027,15 +2955,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "B", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "B", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -3081,15 +3001,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "B", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "B", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -3136,15 +3048,7 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules
                         (defaults
-                            |> sortOnlyMatchingTypes
-                                (\m t ->
-                                    case ( m, t ) of
-                                        ( "A.C.Internal", "Custom" ) ->
-                                            True
-
-                                        _ ->
-                                            False
-                                )
+                            |> sortOnlyMatchingTypes (matchesName ( "A.C.Internal", "Custom" ))
                             |> rule
                         )
                     |> Review.Test.expectErrorsForModules
@@ -3220,6 +3124,11 @@ toString b custom =
         _ -> "Rest"
 """ ]
         ]
+
+
+matchesName : ( String, String ) -> String -> String -> Bool
+matchesName ( expM, expT ) m t =
+    m == expM && t == expT
 
 
 unsortedError : String -> Review.Test.ExpectedError

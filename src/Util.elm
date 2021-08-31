@@ -1,8 +1,6 @@
 module Util exposing (createFix, fallbackCompareFor)
 
-import Elm.Syntax.Expression exposing (Case)
-import Elm.Syntax.Node as Node
-import Elm.Syntax.Range as Range exposing (Range)
+import Elm.Syntax.Range exposing (Range)
 import List.Extra as ListX
 import Review.Fix as Fix exposing (Fix)
 
@@ -25,32 +23,24 @@ fallbackCompareFor comp fallback =
             ltOrGt
 
 
-{-| Given a source code extractor and a sorted list of patterns (with original
+{-| Given a source code extractor and a sorted list of ranges (with original
 indices), create fixes to resort the source code to the list.
 -}
-createFix : (Range -> String) -> List ( ( Int, a ), Case ) -> List Fix
+createFix : (Range -> String) -> List ( ( Int, a ), Range ) -> List Fix
 createFix extractSourceCode sorted =
     let
-        applyFix : Int -> ( ( Int, a ), Case ) -> List Fix
-        applyFix newIndex ( ( oldIndex, _ ), ( pattern, expression ) ) =
+        applyFix : Int -> ( ( Int, a ), Range ) -> List Fix
+        applyFix newIndex ( ( oldIndex, _ ), range ) =
             if newIndex == oldIndex then
                 []
 
             else
                 ListX.find ((==) newIndex << Tuple.first << Tuple.first) sorted
-                    |> Maybe.map
-                        (Tuple.second
-                            >> (\( p, e ) -> [ Node.range p, Node.range e ])
-                            >> Range.combine
-                        )
+                    |> Maybe.map Tuple.second
                     |> Maybe.map
                         (\oldRange ->
                             [ Fix.removeRange oldRange
-                            , Range.combine
-                                [ Node.range pattern
-                                , Node.range expression
-                                ]
-                                |> extractSourceCode
+                            , extractSourceCode range
                                 |> Fix.insertAt oldRange.end
                             ]
                         )
