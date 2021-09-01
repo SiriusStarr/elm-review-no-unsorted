@@ -9,7 +9,8 @@ module NoUnsortedCases exposing
 
 The proper order of custom types is the order in which they are defined in your
 source files, and the order of other patterns may be specified in the rule
-configuration. See the "Configuration" section below for more information.
+configuration. See the [Configuration](#Configuration) section below for more
+information.
 
     config =
         [ NoUnsortedCases.rule NoUnsortedCases.defaults
@@ -862,12 +863,12 @@ expressionVisitor config node context =
                                         -- Generate a fix if unsorted
                                         Just
                                             ( List.map
-                                                (Tuple.mapSecond
-                                                    (\( p, e ) ->
-                                                        Range.combine
-                                                            [ Node.range p
-                                                            , Node.range e
-                                                            ]
+                                                (\( ( i, _ ), ( p, e ) ) ->
+                                                    ( i
+                                                    , Range.combine
+                                                        [ Node.range p
+                                                        , Node.range e
+                                                        ]
                                                     )
                                                 )
                                                 sorted
