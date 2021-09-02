@@ -1,4 +1,4 @@
-module Util exposing (allBindingsInPattern, countUsesIn, createFix, fallbackCompareFor)
+module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor)
 
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
@@ -6,6 +6,7 @@ import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
 import List.Extra as ListX
 import Review.Fix as Fix exposing (Fix)
+import Review.Rule as Rule exposing (Error)
 
 
 {-| Get all immediate child expressions of an expression.
@@ -197,7 +198,7 @@ fallbackCompareFor comp fallback =
 indices), create fixes to resort the source code to the list.
 -}
 createFix : (Range -> String) -> List ( Int, Range ) -> List Fix
-createFix extractSourceCode sorted =
+createFix extractSource sorted =
     let
         applyFix : Int -> ( Int, Range ) -> List Fix
         applyFix newIndex ( oldIndex, range ) =
@@ -210,7 +211,7 @@ createFix extractSourceCode sorted =
                     |> Maybe.map
                         (\oldRange ->
                             [ Fix.removeRange oldRange
-                            , extractSourceCode range
+                            , extractSource range
                                 |> Fix.insertAt oldRange.end
                             ]
                         )
@@ -218,3 +219,61 @@ createFix extractSourceCode sorted =
     in
     List.indexedMap applyFix sorted
         |> List.concat
+
+
+{-| Given context and a list of ordering functions, check if a list is sorted
+and generate errors if it isn't.
+-}
+checkSorting : (Range -> String) -> String -> List ({ a | range : Range } -> { a | range : Range } -> Order) -> Range -> List { a | range : Range } -> List (Error {})
+checkSorting extractSource errorConcerns orderings errorRange ds =
+    let
+        comp : { a | range : Range } -> { a | range : Range } -> Order
+        comp d1 d2 =
+            let
+                go : List ({ a | range : Range } -> { a | range : Range } -> Order) -> Order
+                go os =
+                    case os of
+                        [] ->
+                            EQ
+
+                        o :: os_ ->
+                            (\() -> go os_)
+                                |> fallbackCompareFor (o d1 d2)
+            in
+            go orderings
+
+        indexed : List ( Int, { a | range : Range } )
+        indexed =
+            List.indexedMap Tuple.pair ds
+    in
+    List.sortWith
+        (\( i1, d1 ) ( i2, d2 ) ->
+            -- Sort stably
+            (\() -> compare i1 i2)
+                |> fallbackCompareFor (comp d1 d2)
+        )
+        indexed
+        -- Check if sorted
+        |> (\sorted ->
+                if List.map Tuple.first sorted /= List.map Tuple.first indexed then
+                    -- Generate a fix if unsorted
+                    List.map (Tuple.mapSecond .range) sorted
+                        |> createFix extractSource
+                        |> unsortedError errorConcerns errorRange
+                        |> List.singleton
+
+                else
+                    []
+           )
+
+
+{-| Given a range and a fix, create an unsorted case error.
+-}
+unsortedError : String -> Range -> List Fix -> Error {}
+unsortedError errorConcerns =
+    Rule.errorWithFix
+        { message = errorConcerns ++ " are not sorted."
+        , details =
+            [ errorConcerns ++ " were found out of order.  They should be sorted as specified in the rule configuration."
+            ]
+        }

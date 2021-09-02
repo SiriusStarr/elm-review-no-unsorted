@@ -27,9 +27,8 @@ import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Range as Range exposing (Range)
 import List.Extra as ListX
-import Review.Fix exposing (Fix)
 import Review.Rule as Rule exposing (Error, Rule)
-import Util exposing (allBindingsInPattern, countUsesIn, createFix, fallbackCompareFor)
+import Util exposing (allBindingsInPattern, checkSorting, countUsesIn)
 
 
 {-| Reports `let` declarations that are not in the "proper" order.
@@ -131,7 +130,7 @@ rule : RuleConfig r -> Rule
 rule (RuleConfig r) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoUnsortedLetDeclarations" initialContext
         -- Reverse sort order, as we've been cons-ing them on
-        |> Rule.withExpressionEnterVisitor (expressionVisitor (RuleConfig { r | sortBy = List.reverse r.sortBy }))
+        |> Rule.withExpressionEnterVisitor (expressionVisitor <| RuleConfig { r | sortBy = List.reverse r.sortBy })
         |> Rule.fromModuleRuleSchema
 
 
@@ -161,7 +160,7 @@ type alias DeclCompare =
 
 
 type alias LetDec =
-    { node : Node LetDeclaration
+    { range : Range
     , index : Int
     , namesBound : List String
     , usedInExpression : Bool
@@ -487,7 +486,7 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                                     Node.value (Node.value declaration).name
                             in
                             ( (\es ->
-                                { node = d
+                                { range = Node.range d
                                 , index = index
                                 , namesBound = [ name ]
                                 , usedInExpression = countUsesIn lb.expression name >= 1
@@ -506,7 +505,7 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                                     allBindingsInPattern p
                             in
                             ( (\es ->
-                                { node = d
+                                { range = Node.range d
                                 , index = index
                                 , namesBound = bs
                                 , usedInExpression = List.any ((<) 0 << countUsesIn lb.expression) bs
@@ -519,73 +518,9 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                             )
             in
             ( ListX.reverseMap ((|>) exprs) exprsToDecs
-                |> checkSorting context sortBy (Range.combine <| List.map Node.range lb.declarations)
+                |> checkSorting context.extractSource "Let declarations" sortBy (Range.combine <| List.map Node.range lb.declarations)
             , context
             )
 
         _ ->
             ( [], context )
-
-
-{-| Given context and a list of ordering functions, check if a list of `let`
-declarations is sorted and generate errors if they aren't.
--}
-checkSorting : Context -> List DeclCompare -> Range -> List LetDec -> List (Error {})
-checkSorting context orderings errorRange ds =
-    let
-        comp : LetDec -> LetDec -> Order
-        comp d1 d2 =
-            let
-                go : List (LetDec -> LetDec -> Order) -> Order
-                go os =
-                    case os of
-                        [] ->
-                            EQ
-
-                        o :: os_ ->
-                            (\() -> go os_)
-                                |> fallbackCompareFor (o d1 d2)
-            in
-            go orderings
-
-        indexed : List ( Int, LetDec )
-        indexed =
-            List.indexedMap Tuple.pair ds
-    in
-    List.sortWith
-        (\( i1, d1 ) ( i2, d2 ) ->
-            -- Sort stably
-            (\() -> compare i1 i2)
-                |> fallbackCompareFor (comp d1 d2)
-        )
-        indexed
-        -- Check if sorted
-        |> (\sorted ->
-                if List.map Tuple.first sorted /= List.map Tuple.first indexed then
-                    -- Generate a fix if unsorted
-                    List.map
-                        (Tuple.mapSecond
-                            (\{ node } ->
-                                Node.range node
-                            )
-                        )
-                        sorted
-                        |> createFix context.extractSource
-                        |> unsortedError errorRange
-                        |> List.singleton
-
-                else
-                    []
-           )
-
-
-{-| Given a range and a fix, create an unsorted case error.
--}
-unsortedError : Range -> List Fix -> Error {}
-unsortedError =
-    Rule.errorWithFix
-        { message = "Let declarations are not sorted."
-        , details =
-            [ "Let declarations were found out of order.  They should be sorted as specified in the rule configuration."
-            ]
-        }

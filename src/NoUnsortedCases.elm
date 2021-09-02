@@ -196,12 +196,11 @@ import Elm.Syntax.Range as Range exposing (Range)
 import Elm.Syntax.Type exposing (Type)
 import List.Extra as ListX
 import Maybe.Extra as MaybeX
-import Review.Fix exposing (Fix)
 import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameFor)
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
-import Util exposing (createFix, fallbackCompareFor)
+import Util exposing (checkSorting, fallbackCompareFor)
 
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -564,7 +563,7 @@ type alias ModuleContext =
             )
     , lookupTable : ModuleNameLookupTable
     , moduleName : String
-    , extractSourceCode : Range -> String
+    , extractSource : Range -> String
     }
 
 
@@ -688,11 +687,11 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor metadata projectContext ->
+        (\lookupTable extractSource metadata projectContext ->
             { customTypes = projectContext.customTypes
             , lookupTable = lookupTable
             , moduleName = String.join "." <| Rule.moduleNameFromMetadata metadata
-            , extractSourceCode = sourceCodeExtractor
+            , extractSource = extractSource
             }
         )
         |> Rule.withModuleNameLookupTable
@@ -845,44 +844,24 @@ expressionVisitor config node context =
     case Node.value node of
         Expression.CaseExpression { cases } ->
             -- Convert all patterns to sortable ones, if we can
-            MaybeX.traverse (getSortablePattern config context << Tuple.first) cases
-                -- Pair with index for stable sort
-                |> Maybe.map (List.indexedMap Tuple.pair)
-                |> Maybe.andThen
-                    (\indexed ->
-                        -- Zip with cases and sort stably
-                        ListX.zip indexed cases
-                            |> List.sortWith
-                                (\( ( i1, p1 ), _ ) ( ( i2, p2 ), _ ) ->
-                                    (\() -> compare i1 i2)
-                                        |> fallbackCompareFor (comparePatterns config p1 p2)
-                                )
-                            -- Check if sorted
-                            |> (\sorted ->
-                                    if List.map Tuple.first sorted /= indexed then
-                                        -- Generate a fix if unsorted
-                                        Just
-                                            ( List.map
-                                                (\( ( i, _ ), ( p, e ) ) ->
-                                                    ( i
-                                                    , Range.combine
-                                                        [ Node.range p
-                                                        , Node.range e
-                                                        ]
-                                                    )
-                                                )
-                                                sorted
-                                                |> createFix context.extractSourceCode
-                                                |> unsortedError (Node.range node)
-                                                |> List.singleton
-                                            , context
-                                            )
-
-                                    else
-                                        Nothing
-                               )
-                    )
-                |> Maybe.withDefault ( [], context )
+            MaybeX.traverse
+                (\( p, e ) ->
+                    getSortablePattern config context p
+                        |> Maybe.map
+                            (\sP ->
+                                { pattern = sP
+                                , range =
+                                    Range.combine
+                                        [ Node.range p
+                                        , Node.range e
+                                        ]
+                                }
+                            )
+                )
+                cases
+                |> Maybe.map (checkSorting context.extractSource "Case patterns" [ \c1 c2 -> comparePatterns config c1.pattern c2.pattern ] (Node.range node))
+                |> Maybe.withDefault []
+                |> (\es -> ( es, context ))
 
         _ ->
             -- Nothing to sort in non-case expressions.
@@ -1177,15 +1156,3 @@ comparePatternListLengths p1s p2s =
         ( True, True ) ->
             -- Compare normally if neither does
             compare (List.length p1s.subpatterns) (List.length p2s.subpatterns)
-
-
-{-| Given a range and a fix, create an unsorted case error.
--}
-unsortedError : Range -> List Fix -> Error {}
-unsortedError =
-    Rule.errorWithFix
-        { message = "Case patterns are not sorted."
-        , details =
-            [ "Case patterns were found out of order.  They should be sorted as specified in the rule configuration."
-            ]
-        }
