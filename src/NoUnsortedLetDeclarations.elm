@@ -25,7 +25,7 @@ module NoUnsortedLetDeclarations exposing
 
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
-import Elm.Syntax.Range as Range exposing (Range)
+import Elm.Syntax.Range exposing (Range)
 import List.Extra as ListX
 import Review.Rule as Rule exposing (Error, Rule)
 import Util exposing (allBindingsInPattern, checkSorting, countUsesIn)
@@ -151,12 +151,8 @@ orderings to create a hierarchy of sorting.
 -}
 type RuleConfig r
     = RuleConfig
-        { sortBy : List DeclCompare
+        { sortBy : List (LetDec -> LetDec -> Order)
         }
-
-
-type alias DeclCompare =
-    LetDec -> LetDec -> Order
 
 
 type alias LetDec =
@@ -469,6 +465,16 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                 ( exprsToDecs, exprs ) =
                     ListX.indexedFoldl step ( [], [] ) lb.declarations
 
+                errorRange : Range
+                errorRange =
+                    let
+                        r : Range
+                        r =
+                            Node.range n
+                    in
+                    -- Assume that the `let` of a let block is just the first 3 chars
+                    { r | end = { row = r.start.row, column = r.start.column + 3 } }
+
                 step :
                     Int
                     -> Node LetDeclaration
@@ -518,7 +524,7 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                             )
             in
             ( ListX.reverseMap ((|>) exprs) exprsToDecs
-                |> checkSorting context.extractSource "Let declarations" sortBy (Range.combine <| List.map Node.range lb.declarations)
+                |> checkSorting context.extractSource "Let declarations" sortBy errorRange
             , context
             )
 

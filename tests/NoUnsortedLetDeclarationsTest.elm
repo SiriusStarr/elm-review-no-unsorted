@@ -44,6 +44,23 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "no orderings" <|
+            \() ->
+                """module A exposing (..)
+f =
+    let
+        foo =
+            bar
+        bar =
+            baz
+    in
+    foo
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         ]
 
 
@@ -103,12 +120,7 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """foo =
-            z
-        bar =
-            x
-        baz =
-            y"""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 f =
@@ -173,17 +185,8 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """( b, z ) =
-            j
-
-        (Opaque a) =
-            i
-
-        d =
-            l
-
-        { c, y } =
-            k""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         (Opaque a) =
@@ -259,17 +262,8 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """a =
-            i
-
-        b =
-            j
-
-        x =
-            a
-
-        y =
-            b""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         x =
@@ -339,17 +333,8 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """y =
-            b
-
-        x =
-            a
-
-        b =
-            j
-
-        a =
-            i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         x =
@@ -365,7 +350,8 @@ f =
             j
     in
     x + y
-""" ]
+"""
+                        ]
         ]
 
 
@@ -424,17 +410,8 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """b =
-            y
-
-        a =
-            x
-
-        x =
-            i
-
-        y =
-            j""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         x =
@@ -504,17 +481,8 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """x =
-            i
-
-        b =
-            y
-
-        y =
-            j
-
-        a =
-            x""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         x =
@@ -530,7 +498,8 @@ f =
             y
     in
     a + b
-""" ]
+"""
+                        ]
         ]
 
 
@@ -588,17 +557,9 @@ f =
                             |> alphabetically
                             |> rule
                         )
-                    |> Review.Test.expectErrors [ unsortedError """a =
-            x
-
-        x =
-            i
-
-        b =
-            y
-
-        y =
-            j""" |> Review.Test.whenFixed """module A exposing (..)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         a =
@@ -614,7 +575,8 @@ f =
             j
     in
     0
-""" ]
+"""
+                        ]
         ]
 
 
@@ -672,17 +634,9 @@ f =
                             |> alphabetically
                             |> rule
                         )
-                    |> Review.Test.expectErrors [ unsortedError """a =
-            x
-
-        x =
-            i
-
-        b =
-            y
-
-        y =
-            j""" |> Review.Test.whenFixed """module A exposing (..)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 f =
     let
         x =
@@ -698,7 +652,8 @@ f =
             y
     in
     0
-""" ]
+"""
+                        ]
         ]
 
 
@@ -757,17 +712,7 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """x =
-            a
-
-        a i =
-            i
-
-        y =
-            b
-
-        b j =
-            j"""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 f =
@@ -845,17 +790,7 @@ f =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """x =
-            a
-
-        a i =
-            i
-
-        y =
-            b
-
-        b j =
-            j"""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 f =
@@ -878,11 +813,11 @@ f =
         ]
 
 
-unsortedError : String -> Review.Test.ExpectedError
-unsortedError under =
+unsortedError : Review.Test.ExpectedError
+unsortedError =
     Review.Test.error
         { message = "Let declarations are not sorted."
         , details =
             [ "Let declarations were found out of order.  They should be sorted as specified in the rule configuration." ]
-        , under = under
+        , under = "let"
         }

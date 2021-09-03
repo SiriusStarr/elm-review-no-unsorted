@@ -947,10 +947,7 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Bar -> "Bar"
-        Baz -> "Baz"
-        Foo -> "Foo\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -988,7 +985,7 @@ type Custom = Foo | Bar | Baz
 
 toString : Custom -> String
 toString custom =
-    -- A case
+    -- A block of patterns
     case custom of
         Bar ->
             -- Bar
@@ -1004,25 +1001,14 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Bar ->
-            -- Bar
-            "Bar"
-
-        Baz ->
-            -- Baz
-            "Baz"
-
-        Foo ->
-            -- Foo
-            "Foo\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
 
 toString : Custom -> String
 toString custom =
-    -- A case
+    -- A block of patterns
     case custom of
         Foo ->
             -- Foo
@@ -1045,7 +1031,7 @@ type Custom = Foo | Bar | Baz
 
 toString : Custom -> String -> String
 toString custom string =
-    -- A case
+    -- A multiline expression
     case
         ( custom
         , string
@@ -1072,36 +1058,14 @@ toString custom string =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case
-        ( custom
-        , string
-        )
-    of
-        ( Bar, "A pattern" ) ->
-            -- Bar
-            "Bar"
-
-        ( Baz, Foo ) ->
-            -- Baz
-            "Baz"
-
-        ( Foo, _ ) ->
-            -- Foo
-            toString
-                |> toPipeline
-                |> andSuch
-
-        _ ->
-            \"\"\"Multiline
-        string
-        expression?\"\"\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
 
 toString : Custom -> String -> String
 toString custom string =
-    -- A case
+    -- A multiline expression
     case
         ( custom
         , string
@@ -1154,10 +1118,7 @@ toString custom =
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        Foo -> "Foo"
-        Baz -> "Baz"
-        Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module B exposing (..)
 
 import A exposing (Custom(..))
@@ -1193,10 +1154,7 @@ toString custom =
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        A.Bar -> "Bar"
-        A.Foo -> "Foo"
-        A.Baz -> "Baz\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed
                                     """module B exposing (..)
 
@@ -1238,10 +1196,7 @@ toString custom =
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectErrorsForModules
                         [ ( "C"
-                          , [ unsortedError """case custom of
-        A.Baz -> "Baz"
-        A.Bar -> "Bar"
-        A.Foo -> "Foo\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed
                                     """module C exposing (..)
 
@@ -1284,10 +1239,7 @@ toString custom =
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectErrorsForModules
                         [ ( "C"
-                          , [ unsortedError """case custom of
-        Foo -> "Foo"
-        Bar -> "Bar"
-        Baz -> "Baz\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed
                                     """module C exposing (..)
 
@@ -1327,10 +1279,7 @@ toString custom =
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        Baz -> "Baz"
-        Bar -> "Bar"
-        Foo -> "Foo\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed
                                     """module B exposing (..)
 
@@ -1369,10 +1318,7 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        _ -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1401,10 +1347,7 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        bar -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1437,12 +1380,7 @@ toString custom1 custom2 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (custom1, custom2) of
-        (_, B) -> "B"
-        (_, A) -> "A"
-        (Bar, _) -> "BarNotBOrA"
-        (Foo, _) -> "FooNotBOrA"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom1 = Foo | Bar | Baz
@@ -1477,12 +1415,6 @@ toString cs =
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
                         [ unsortedError
-                            """case cs of
-        [_, Bar] -> "_Bar"
-        [_, Foo] -> "_Foo"
-        [Bar, _] -> "Bar_"
-        [Foo, _] -> "Foo_"
-        _ -> "Too many...\""""
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -1514,12 +1446,7 @@ toString cs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case cs of
-        _ :: Bar :: _ -> "_Bar_"
-        _ :: Foo :: _ -> "_Foo_"
-        Bar :: _ -> "Bar_"
-        Foo :: _ -> "Foo_"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -1555,10 +1482,7 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        (Baz) -> "Bar"
-        Foo -> "Foo"
-        Bar -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1587,10 +1511,7 @@ toString custom =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        (Bar as b) -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1633,16 +1554,7 @@ toString custom1 custom2 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (custom1, custom2) of
-        (Bar, A) -> "BarA"
-        (Bar, B) -> "BarB"
-        (Bar, C) -> "BarC"
-        (Foo, A) -> "FooA"
-        (Foo, B) -> "FooB"
-        (Foo, C) -> "FooC"
-        (Baz, A) -> "BazA"
-        (Baz, B) -> "BazB"
-        (Baz, C) -> "BazC\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1687,16 +1599,7 @@ toString custom1 custom2 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (custom1, custom2) of
-        (Foo, A) -> "FooA"
-        (Foo, C) -> "FooC"
-        (Foo, B) -> "FooB"
-        (Bar, A) -> "BarA"
-        (Bar, B) -> "BarB"
-        (Bar, C) -> "BarC"
-        (Baz, A) -> "BazA"
-        (Baz, B) -> "BazB"
-        (Baz, C) -> "BazC\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1742,17 +1645,7 @@ toString custom1 custom2 custom3 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (custom1, custom2, custom3) of
-        (Foo, A, Foo) -> "FooAFoo"
-        (Foo, A, Bar) -> "FooABar"
-        (Foo, A, Baz) -> "FooABaz"
-        (Foo, B, Foo) -> "FooBFoo"
-        (Foo, B, Baz) -> "FooBBaz"
-        (Foo, B, Bar) -> "FooBBar"
-        (Foo, C, Foo) -> "FooCFoo"
-        (Foo, C, Bar) -> "FooCBar"
-        (Foo, C, Baz) -> "FooCBaz"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1799,17 +1692,7 @@ toString custom1 custom2 custom3 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case ((custom1, custom2), custom3) of
-        ((Foo, A), Foo) -> "FooAFoo"
-        ((Foo, A), Bar) -> "FooABar"
-        ((Foo, A), Baz) -> "FooABaz"
-        ((Foo, B), Foo) -> "FooBFoo"
-        ((Foo, C), Foo) -> "FooCFoo"
-        ((Foo, B), Bar) -> "FooBBar"
-        ((Foo, B), Baz) -> "FooBBaz"
-        ((Foo, C), Bar) -> "FooCBar"
-        ((Foo, C), Baz) -> "FooCBaz"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1853,14 +1736,7 @@ toString custom1 custom2 custom3 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case ((custom1, (custom2, custom2)), custom3, (custom2, custom2)) of
-        ((Foo, (A, A)), Foo, (A, A)) -> "1"
-        ((Foo, (A, B)), Foo, (A, A)) -> "2"
-        ((Foo, (B, A)), Foo, (A, A)) -> "4"
-        ((Foo, (A, C)), Foo, (A, A)) -> "3"
-        ((Foo, (B, A)), Foo, (A, C)) -> "5"
-        ((Foo, (B, A)), Foo, (B, A)) -> "6"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1922,19 +1798,7 @@ toString xs =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        [Foo] -> "Foo"
-        [Bar] -> "Bar"
-        [Baz] -> "Baz"
-        [Foo, Foo] -> "FooFoo"
-        [Foo, Bar] -> "FooBar"
-        [Foo, Baz] -> "FooBaz"
-        [Bar, Foo] -> "BarFoo"
-        [Bar, Baz] -> "BarBaz"
-        [Bar, Bar] -> "BarBar"
-        [Foo, Foo, Foo] -> "FooFooFoo"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -1985,19 +1849,7 @@ toString xs =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        [Foo] -> "Foo"
-        [Foo, Foo] -> "FooFoo"
-        [Foo, Foo, Foo] -> "FooFooFoo"
-        [Foo, Bar] -> "FooBar"
-        [Foo, Baz] -> "FooBaz"
-        [Bar] -> "Bar"
-        [Bar, Foo] -> "BarFoo"
-        [Bar, Bar] -> "BarBar"
-        [Bar, Baz] -> "BarBaz"
-        [Baz] -> "Baz"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -2052,23 +1904,7 @@ toString xs =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        [Foo] -> "Foo"
-        Foo :: Foo :: [] -> "FooFoo"
-        [Foo, Foo, Foo] -> "FooFooFoo"
-        [Foo, Bar] -> "FooBar"
-        [Foo, Baz] -> "FooBaz"
-        Foo :: _ -> "Foo+"
-        [Bar] -> "Bar"
-        [Bar, Foo] -> "BarFoo"
-        [Bar, Bar] -> "BarBar"
-        Bar :: Bar :: _ -> "BarBar+"
-        [Bar, Baz] -> "BarBaz"
-        Bar :: _ :: _ -> "Bar++"
-        Bar :: _ -> "Bar+"
-        [Baz] -> "Baz"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2124,19 +1960,7 @@ toString xs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        [Foo] -> "Foo"
-        [Foo, Foo] -> "FooFoo"
-        [Foo, Foo, Foo] -> "FooFooFoo"
-        [Foo, Bar] -> "FooBar"
-        [Foo, Baz] -> "FooBaz"
-        [Baz] -> "Baz"
-        [Bar] -> "Bar"
-        [Bar, Foo] -> "BarFoo"
-        [Bar, Bar] -> "BarBar"
-        [Bar, Baz] -> "BarBaz"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -2183,19 +2007,7 @@ toString xs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        [Foo] -> "Foo"
-        [Bar] -> "Bar"
-        [Baz] -> "Baz"
-        [Foo, Foo] -> "FooFoo"
-        [Foo, Bar] -> "FooBar"
-        [Foo, Baz] -> "FooBaz"
-        [Bar, Foo] -> "BarFoo"
-        [Bar, Bar] -> "BarBar"
-        [Bar, Baz] -> "BarBaz"
-        [Foo, Foo, Foo] -> "FooFooFoo"
-        _ -> "Too many...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -2242,19 +2054,8 @@ toString xs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        [] -> ""
-        Foo :: [] -> "Foo"
-        [Bar] -> "Bar"
-        [Baz] -> "Baz"
-        [Bar, Foo] -> "BarFoo"
-        Bar :: Bar :: [] -> "BarBar"
-        [Bar, Baz] -> "BarBaz"
-        Bar :: Bar :: _ -> "BarBar+"
-        Bar :: _ :: _ -> "Bar++"
-        Foo :: _ -> "Foo+"
-        Bar :: _ -> "Bar+"
-        _ -> "Too many...\"""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
 
@@ -2273,7 +2074,8 @@ toString xs =
         Bar :: _ -> "Bar+"
         [Baz] -> "Baz"
         _ -> "Too many..."
-""" ]
+"""
+                        ]
         ]
 
 
@@ -2295,10 +2097,7 @@ toString xs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        Foo :: _ -> "Foo"
-        Baz :: _ -> "Baz"
-        Bar :: _ -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2326,10 +2125,7 @@ toString xs =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case xs of
-        (Bar, 1) :: (Bar, 2) :: _ -> "Bar"
-        (Foo, 1) :: (Foo, 2) :: _ -> "Foo"
-        (Baz, 1) :: (Baz, 2) :: _ -> "Baz\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2362,11 +2158,7 @@ toString i =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case i of
-        2 -> "2"
-        0 -> "0"
-        4 -> "4"
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Int -> String
@@ -2392,11 +2184,8 @@ toString i =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case i of
-        0x2 -> "2"
-        0x0 -> "0"
-        0xF -> "F"
-        _ -> "Something else...\"""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Int -> String
 toString i =
@@ -2405,7 +2194,8 @@ toString i =
         0x2 -> "2"
         0xF -> "F"
         _ -> "Something else..."
-""" ]
+"""
+                        ]
         , test "not in literal order with floats" <|
             \() ->
                 """module A exposing (..)
@@ -2420,11 +2210,7 @@ toString f =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case f of
-        2.3 -> "2"
-        0.0 -> "0"
-        4.0 -> "4"
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Float -> String
@@ -2450,11 +2236,7 @@ toString s =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case s of
-        "A" -> 'A'
-        "C" -> 'C'
-        "B" -> 'B'
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : String -> Char
@@ -2480,11 +2262,7 @@ toString c =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case c of
-        'A' -> "A"
-        'C' -> "C"
-        'B' -> "B"
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Char -> String
@@ -2514,13 +2292,7 @@ toString c i =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (c, i) of
-        (Foo, 2) -> "0"
-        (Foo, 0) -> "0"
-        (Bar, 2) -> "2"
-        (Baz, 2) -> "2"
-        (_, 4) -> "4"
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2553,12 +2325,7 @@ toString c i =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (c, i) of
-        (Foo, 0) -> "0"
-        (Baz, 2) -> "2"
-        (Bar, 2) -> "2"
-        (_, 4) -> "4"
-        _ -> "Something else...\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2591,9 +2358,7 @@ toString b =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectErrors
-                        [ unsortedError """case b of
-        False -> "False"
-        True -> "True\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Bool -> String
@@ -2619,9 +2384,7 @@ toString b =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case b of
-        True -> "True"
-        False -> "False\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 toString : Bool -> String
@@ -2657,11 +2420,7 @@ toString custom =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Nothing -> "Nothing"
-        Just Foo -> "Foo"
-        Just Bar -> "Bar"
-        Just Baz -> "Baz\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
@@ -2695,11 +2454,8 @@ toString custom =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case custom of
-        Just Bar -> "Bar"
-        Just Foo -> "Foo"
-        Just Baz -> "Baz"
-        Nothing -> "Nothing\"""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
 
@@ -2710,7 +2466,8 @@ toString custom =
         Just Bar -> "Bar"
         Just Baz -> "Baz"
         Nothing -> "Nothing"
-""" ]
+"""
+                        ]
         , test "with non-sortable patterns" <|
             \() ->
                 """module A exposing (..)
@@ -2732,10 +2489,7 @@ toString c =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case c of
-        Container Bar 2 1 -> "Bar"
-        Container Foo 1 2 -> "Foo"
-        Container Baz 2 2 -> "Baz\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Container = Container Custom Int Int
@@ -2771,10 +2525,7 @@ toString c =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case c of
-        Container 1 {field} Baz 1 -> "Baz"
-        Container 1 {field} Foo 1 -> "Foo"
-        Container 1 {field} Bar 1 -> "Bar\""""
+                        [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Container = Container Int {field : Bool} Custom Int
@@ -2820,10 +2571,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module B exposing (..)
 
 import A exposing (Custom(..))
@@ -2863,10 +2611,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        A.Baz -> "Baz"
-        A.Foo -> "Foo"
-        A.Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module B exposing (..)
 
 import A
@@ -2911,10 +2656,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "C"
-                          , [ unsortedError """case custom of
-        A.Baz -> "Baz"
-        A.Foo -> "Foo"
-        A.Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module C exposing (..)
 
 import A
@@ -2960,10 +2702,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "C"
-                          , [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module C exposing (..)
 
 import A
@@ -3006,10 +2745,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        Baz -> "Baz"
-        Foo -> "Foo"
-        Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module B exposing (..)
 
 import A
@@ -3053,10 +2789,7 @@ toString custom =
                         )
                     |> Review.Test.expectErrorsForModules
                         [ ( "B"
-                          , [ unsortedError """case custom of
-        X.Baz -> "Baz"
-        X.Foo -> "Foo"
-        X.Bar -> "Bar\""""
+                          , [ unsortedError
                                 |> Review.Test.whenFixed """module B exposing (..)
 
 import A.C.Internal as X
@@ -3105,12 +2838,8 @@ toString b custom =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ unsortedError """case (b, custom) of
-        (False, Bar) -> "Bar"
-        (False, Foo) -> "Foo"
-        (True, Foo) -> "Foo"
-        (False, Baz) -> "Baz"
-        _ -> "Rest\"""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Custom = Foo | Bar | Baz
 
@@ -3122,7 +2851,8 @@ toString b custom =
         (False, Bar) -> "Bar"
         (False, Baz) -> "Baz"
         _ -> "Rest"
-""" ]
+"""
+                        ]
         ]
 
 
@@ -3131,12 +2861,12 @@ matchesName ( expM, expT ) m t =
     m == expM && t == expT
 
 
-unsortedError : String -> Review.Test.ExpectedError
-unsortedError under =
+unsortedError : Review.Test.ExpectedError
+unsortedError =
     Review.Test.error
         { message = "Case patterns are not sorted."
         , details =
             [ "Case patterns were found out of order.  They should be sorted as specified in the rule configuration."
             ]
-        , under = under
+        , under = "case"
         }

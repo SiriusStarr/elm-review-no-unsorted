@@ -843,6 +843,17 @@ expressionVisitor : RuleConfig -> Node Expression -> ModuleContext -> ( List (Er
 expressionVisitor config node context =
     case Node.value node of
         Expression.CaseExpression { cases } ->
+            let
+                errorRange : Range
+                errorRange =
+                    let
+                        r : Range
+                        r =
+                            Node.range node
+                    in
+                    -- Assume that the `case` of a case block is just the first 4 chars
+                    { r | end = { row = r.start.row, column = r.start.column + 4 } }
+            in
             -- Convert all patterns to sortable ones, if we can
             MaybeX.traverse
                 (\( p, e ) ->
@@ -859,7 +870,7 @@ expressionVisitor config node context =
                             )
                 )
                 cases
-                |> Maybe.map (checkSorting context.extractSource "Case patterns" [ \c1 c2 -> comparePatterns config c1.pattern c2.pattern ] (Node.range node))
+                |> Maybe.map (checkSorting context.extractSource "Case patterns" [ \c1 c2 -> comparePatterns config c1.pattern c2.pattern ] errorRange)
                 |> Maybe.withDefault []
                 |> (\es -> ( es, context ))
 
