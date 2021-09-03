@@ -13,12 +13,19 @@ when inside the directory containing this file.
 
 import NoUnsortedCases
 import NoUnsortedLetDeclarations
+import NoUnsortedTopLevelDeclarations
 import Review.Rule exposing (Rule)
 
 
 config : List Rule
 config =
     [ NoUnsortedCases.rule NoUnsortedCases.defaults
+    , NoUnsortedTopLevelDeclarations.rule
+        (NoUnsortedTopLevelDeclarations.sortTopLevelDeclarations
+            |> NoUnsortedTopLevelDeclarations.portsFirst
+            |> NoUnsortedTopLevelDeclarations.exposedOrderWithPrivateLast
+            |> NoUnsortedTopLevelDeclarations.alphabetically
+        )
     , NoUnsortedLetDeclarations.rule
         (NoUnsortedLetDeclarations.sortLetDeclarations
             |> NoUnsortedLetDeclarations.alphabetically
