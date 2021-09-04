@@ -130,7 +130,7 @@ rule : RuleConfig r -> Rule
 rule (RuleConfig r) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoUnsortedLetDeclarations" initialContext
         -- Reverse sort order, as we've been cons-ing them on
-        |> Rule.withExpressionEnterVisitor (expressionVisitor <| RuleConfig { r | sortBy = List.reverse r.sortBy })
+        |> Rule.withExpressionEnterVisitor (\e c -> ( expressionVisitor (RuleConfig { r | sortBy = List.reverse r.sortBy }) e c, c ))
         |> Rule.fromModuleRuleSchema
 
 
@@ -457,7 +457,7 @@ valuesAfterFunctions (RuleConfig r) =
 
 {-| Visit expressions, checking `let` blocks for sorting.
 -}
-expressionVisitor : RuleConfig r -> Node Expression -> Context -> ( List (Error {}), Context )
+expressionVisitor : RuleConfig r -> Node Expression -> Context -> List (Error {})
 expressionVisitor (RuleConfig { sortBy }) n context =
     case Node.value n of
         LetExpression lb ->
@@ -523,10 +523,8 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                             , expression :: eAcc
                             )
             in
-            ( ListX.reverseMap ((|>) exprs) exprsToDecs
+            ListX.reverseMap ((|>) exprs) exprsToDecs
                 |> checkSorting context.extractSource "Let declarations" sortBy errorRange
-            , context
-            )
 
         _ ->
-            ( [], context )
+            []

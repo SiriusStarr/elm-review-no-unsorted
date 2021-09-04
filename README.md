@@ -1,7 +1,7 @@
 # elm-review-no-unsorted
 
 Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-review/latest/)
-rules to ensure that cases are sorted in the "proper" order.
+rules to ensure that various things are sorted in the "proper" order.
 
 ## Provided rules
 

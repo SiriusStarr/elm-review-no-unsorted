@@ -1,4 +1,4 @@
-module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor)
+module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor, validate)
 
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
@@ -277,3 +277,15 @@ unsortedError errorConcerns =
             [ errorConcerns ++ " were found out of order.  They should be sorted as specified in the rule configuration."
             ]
         }
+
+
+{-| Keep a value only if it passes a predicate. Like `Maybe.Extra.filter`, but
+does not take a `Maybe` as input.
+-}
+validate : (a -> Bool) -> a -> Maybe a
+validate pred x =
+    if pred x then
+        Just x
+
+    else
+        Nothing

@@ -200,7 +200,7 @@ import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameF
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
-import Util exposing (checkSorting, fallbackCompareFor)
+import Util exposing (checkSorting, fallbackCompareFor, validate)
 
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -208,7 +208,7 @@ import Util exposing (checkSorting, fallbackCompareFor)
 rule : RuleConfig -> Rule
 rule config =
     Rule.newProjectRuleSchema "NoUnsortedCases" initialProjectContext
-        |> Rule.withDependenciesProjectVisitor (dependencyVisitor config)
+        |> Rule.withDependenciesProjectVisitor (\d c -> ( [], dependencyVisitor config d c ))
         |> Rule.withModuleVisitor (moduleVisitor config)
         |> Rule.withModuleContextUsingContextCreator
             { fromProjectToModule = fromProjectToModule
@@ -654,8 +654,8 @@ checking all expressions for `case`s.
 moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema schemaState ModuleContext -> Rule.ModuleRuleSchema { schemaState | hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withDeclarationListVisitor (declarationListVisitor config)
-        |> Rule.withExpressionEnterVisitor (expressionVisitor config)
+        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
+        |> Rule.withExpressionEnterVisitor (\e c -> ( expressionVisitor config e c, c ))
 
 
 {-| The initial project context knows of no types.
@@ -714,7 +714,7 @@ foldProjectContexts newContext prevContext =
 
 {-| Visit all dependencies and store type order from them.
 -}
-dependencyVisitor : RuleConfig -> Dict String Dependency -> ProjectContext -> ( List (Error { useErrorForModule : () }), ProjectContext )
+dependencyVisitor : RuleConfig -> Dict String Dependency -> ProjectContext -> ProjectContext
 dependencyVisitor (RuleConfig config) deps context =
     let
         docToEntry : String -> Elm.Docs.Union -> Maybe ( String, { constructors : Set String, declarationOrder : List String } )
@@ -770,10 +770,9 @@ dependencyVisitor (RuleConfig config) deps context =
             )
             context
             deps
-            |> Tuple.pair []
 
     else
-        ( [], context )
+        context
 
 
 
@@ -782,7 +781,7 @@ dependencyVisitor (RuleConfig config) deps context =
 
 {-| Visit declarations, storing custom type orders.
 -}
-declarationListVisitor : RuleConfig -> List (Node Declaration) -> ModuleContext -> ( List nothing, ModuleContext )
+declarationListVisitor : RuleConfig -> List (Node Declaration) -> ModuleContext -> ModuleContext
 declarationListVisitor (RuleConfig config) declarations context =
     let
         getCustomType : Node Declaration -> Maybe Type
@@ -818,18 +817,10 @@ declarationListVisitor (RuleConfig config) declarations context =
                         , typeConstructors type_
                         )
                     )
-                |> (\ls ->
-                        -- Only insert non-empty dict
-                        if List.isEmpty ls then
-                            Nothing
-
-                        else
-                            Just ls
-                   )
+                |> validate (not << List.isEmpty)
                 |> Maybe.map Dict.fromList
                 |> MaybeX.unwrap context.customTypes (\v -> Dict.insert [] v context.customTypes)
     }
-        |> Tuple.pair []
 
 
 
@@ -839,7 +830,7 @@ declarationListVisitor (RuleConfig config) declarations context =
 {-| Visit all expressions in a module, checking for `case`s and ensuring those
 are sorted properly.
 -}
-expressionVisitor : RuleConfig -> Node Expression -> ModuleContext -> ( List (Error {}), ModuleContext )
+expressionVisitor : RuleConfig -> Node Expression -> ModuleContext -> List (Error {})
 expressionVisitor config node context =
     case Node.value node of
         Expression.CaseExpression { cases } ->
@@ -872,11 +863,10 @@ expressionVisitor config node context =
                 cases
                 |> Maybe.map (checkSorting context.extractSource "Case patterns" [ \c1 c2 -> comparePatterns config c1.pattern c2.pattern ] errorRange)
                 |> Maybe.withDefault []
-                |> (\es -> ( es, context ))
 
         _ ->
             -- Nothing to sort in non-case expressions.
-            ( [], context )
+            []
 
 
 {-| Given config, context, and a pattern, convert it into a pattern we know

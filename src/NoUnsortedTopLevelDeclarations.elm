@@ -134,7 +134,7 @@ rule : RuleConfig r -> Rule
 rule (RuleConfig r) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoUnsortedTopLevelDeclarations" initialContext
         |> Rule.withModuleDefinitionVisitor (\m c -> ( [], getModuleExports m c ))
-        |> Rule.withDeclarationListVisitor (declarationVisitor <| RuleConfig { r | sortBy = List.reverse r.sortBy })
+        |> Rule.withDeclarationListVisitor (\ds c -> ( declarationVisitor (RuleConfig { r | sortBy = List.reverse r.sortBy }) ds c, c ))
         |> Rule.fromModuleRuleSchema
 
 
@@ -561,11 +561,10 @@ getModuleExports m context =
 
 {-| Generate declaration info for all TLDs and then check that they are sorted.
 -}
-declarationVisitor : RuleConfig r -> List (Node Declaration) -> Context -> ( List (Error {}), Context )
+declarationVisitor : RuleConfig r -> List (Node Declaration) -> Context -> List (Error {})
 declarationVisitor (RuleConfig { sortBy }) ds context =
     List.filterMap (getDecInfo context.exports) ds
         |> checkSorting context.extractSource "Top-level declarations" sortBy context.errorRange
-        |> (\es -> ( es, context ))
 
 
 {-| Given a list of module exports, generate TLD info from a `declaration`.
