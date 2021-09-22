@@ -1,4 +1,4 @@
-module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor, validate)
+module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor, makeAccessFunc, validate)
 
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
@@ -210,9 +210,9 @@ createFix extractSource sorted =
                     |> Maybe.map Tuple.second
                     |> Maybe.map
                         (\oldRange ->
-                            [ Fix.removeRange oldRange
-                            , extractSource range
-                                |> Fix.insertAt oldRange.end
+                            [ extractSource range
+                                |> String.trimRight
+                                |> Fix.replaceRangeBy oldRange
                             ]
                         )
                     |> Maybe.withDefault []
@@ -289,3 +289,16 @@ validate pred x =
 
     else
         Nothing
+
+
+{-| Work around `elm-syntax` sometimes including a period in record access
+functions.
+-}
+makeAccessFunc : String -> String
+makeAccessFunc accessFunc =
+    if String.startsWith "." accessFunc then
+        -- Work around elm-syntax behavior
+        String.dropLeft 1 accessFunc
+
+    else
+        accessFunc

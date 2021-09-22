@@ -3,6 +3,39 @@ module NoUnsortedCases exposing
     , RuleConfig, defaults, sortOnlyMatchingTypes, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
     )
 
+{-|
+
+
+## Rule
+
+@docs rule
+
+
+## Configuration
+
+@docs RuleConfig, defaults, sortOnlyMatchingTypes, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
+
+-}
+
+import Dict exposing (Dict)
+import Dict.Extra as DictX
+import Elm.Docs
+import Elm.Syntax.Declaration as Declaration exposing (Declaration)
+import Elm.Syntax.Expression as Expression exposing (Expression)
+import Elm.Syntax.ModuleName exposing (ModuleName)
+import Elm.Syntax.Node as Node exposing (Node)
+import Elm.Syntax.Pattern as Pattern exposing (Pattern)
+import Elm.Syntax.Range as Range exposing (Range)
+import Elm.Syntax.Type exposing (Type)
+import List.Extra as ListX
+import Maybe.Extra as MaybeX
+import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameFor)
+import Review.Project.Dependency as Dependency exposing (Dependency)
+import Review.Rule as Rule exposing (Error, Rule)
+import Set exposing (Set)
+import Util exposing (checkSorting, fallbackCompareFor, validate)
+
+
 {-| Reports case patterns that are not in the "proper" order.
 
 🔧 Running with `--fix` will automatically sort the patterns.
@@ -172,38 +205,6 @@ You can try this rule out by running the following command:
 elm-review --template SiriusStarr/elm-review-no-unsorted/example --rules NoUnsortedCases
 ```
 
-
-## Rule
-
-@docs rule
-
-
-## Configuration
-
-@docs RuleConfig, defaults, sortOnlyMatchingTypes, doNotSortLiterals, doNotSortTypesFromDependencies, sortTypesFromDependenciesAlphabetically, sortListPatternsByLength, doNotLookPastUnsortable
-
--}
-
-import Dict exposing (Dict)
-import Dict.Extra as DictX
-import Elm.Docs
-import Elm.Syntax.Declaration as Declaration exposing (Declaration)
-import Elm.Syntax.Expression as Expression exposing (Expression)
-import Elm.Syntax.ModuleName exposing (ModuleName)
-import Elm.Syntax.Node as Node exposing (Node)
-import Elm.Syntax.Pattern as Pattern exposing (Pattern)
-import Elm.Syntax.Range as Range exposing (Range)
-import Elm.Syntax.Type exposing (Type)
-import List.Extra as ListX
-import Maybe.Extra as MaybeX
-import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameFor)
-import Review.Project.Dependency as Dependency exposing (Dependency)
-import Review.Rule as Rule exposing (Error, Rule)
-import Set exposing (Set)
-import Util exposing (checkSorting, fallbackCompareFor, validate)
-
-
-{-| Reports case patterns that are not in the "proper" order.
 -}
 rule : RuleConfig -> Rule
 rule config =
