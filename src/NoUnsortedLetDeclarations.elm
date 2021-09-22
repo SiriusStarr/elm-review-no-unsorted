@@ -7,7 +7,7 @@ module NoUnsortedLetDeclarations exposing
 {-|
 
 
-## Rule
+## Review Rule
 
 @docs rule
 
@@ -36,7 +36,7 @@ import Util exposing (allBindingsInPattern, checkSorting, countUsesIn)
 🔧 Running with `--fix` will automatically sort the declarations.
 
 The proper order of declarations is specified in the rule configuration. See the
-[Configuration](#Configuration) section below for more information.
+[Configuration](#configuration) section below for more information.
 
     config =
         [ NoUnsortedLetDeclarations.rule
@@ -134,11 +134,15 @@ rule (RuleConfig r) =
         |> Rule.fromModuleRuleSchema
 
 
+{-| Context for the rule, containing only a source extractor.
+-}
 type alias Context =
     { extractSource : Range -> String
     }
 
 
+{-| Create a context with a source extractor.
+-}
 initialContext : Rule.ContextCreator () Context
 initialContext =
     Rule.initContextCreator
@@ -155,6 +159,8 @@ type RuleConfig r
         }
 
 
+{-| A `let` declaration, parsed for full information.
+-}
 type alias LetDec =
     { range : Range
     , index : Int

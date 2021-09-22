@@ -1,5 +1,8 @@
 module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor, makeAccessFunc, validate)
 
+{-| Utility functions used by other modules but not specific to them.
+-}
+
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))

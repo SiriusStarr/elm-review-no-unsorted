@@ -6,7 +6,7 @@ module NoUnsortedRecords exposing
 {-|
 
 
-## Rule
+## Review Rule
 
 @docs rule
 

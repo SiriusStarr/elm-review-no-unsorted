@@ -7,7 +7,7 @@ module NoUnsortedTopLevelDeclarations exposing
 {-|
 
 
-## Rule
+## Review Rule
 
 @docs rule
 
@@ -39,7 +39,7 @@ import Util exposing (checkSorting)
 🔧 Running with `--fix` will automatically sort the declarations.
 
 The proper order of declarations is specified in the rule configuration. See the
-[Configuration](#Configuration) section below for more information.
+[Configuration](#configuration) section below for more information.
 
     config =
         [ NoUnsortedTopLevelDeclarations.rule
@@ -498,6 +498,8 @@ portsLast (RuleConfig r) =
         }
 
 
+{-| Create a context with a source extractor.
+-}
 initialContext : Rule.ContextCreator () Context
 initialContext =
     Rule.initContextCreator

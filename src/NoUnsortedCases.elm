@@ -6,7 +6,7 @@ module NoUnsortedCases exposing
 {-|
 
 
-## Rule
+## Review Rule
 
 @docs rule
 
@@ -42,7 +42,7 @@ import Util exposing (checkSorting, fallbackCompareFor, validate)
 
 The proper order of custom types is the order in which they are defined in your
 source files, and the order of other patterns may be specified in the rule
-configuration. See the [Configuration](#Configuration) section below for more
+configuration. See the [Configuration](#configuration) section below for more
 information.
 
     config =
