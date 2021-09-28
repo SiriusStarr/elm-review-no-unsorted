@@ -335,8 +335,10 @@ type SortWithoutCanonicalOrder
 Use `reportUnknownRecordsWithoutFix`, etc. to alter this behavior, e.g.
 
     config =
-        [ NoUnsortedRecords.defaults
-            |> NoUnsortedRecords.reportAmbiguousRecordsWithoutFix
+        [ NoUnsortedRecords.rule
+            (NoUnsortedRecords.defaults
+                |> NoUnsortedRecords.reportAmbiguousRecordsWithoutFix
+            )
         ]
 
 -}
