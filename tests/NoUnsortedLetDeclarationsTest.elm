@@ -3,6 +3,12 @@ module NoUnsortedLetDeclarationsTest exposing (all)
 import NoUnsortedLetDeclarations
     exposing
         ( alphabetically
+        , glueDependenciesAfterFirstDependent
+        , glueDependenciesAfterLastDependent
+        , glueDependenciesBeforeFirstDependent
+        , glueDependenciesBeforeLastDependent
+        , glueHelpersAfter
+        , glueHelpersBefore
         , rule
         , sortLetDeclarations
         , usedInExpressionFirst
@@ -21,6 +27,7 @@ all =
     describe "NoUnsortedLetDeclarations"
         [ passes
         , orderings
+        , glues
         ]
 
 
@@ -143,10 +150,10 @@ f =
         (Opaque a) =
             i
 
-        ( b, z ) =
+        ( z, b ) =
             j
 
-        { c, y } =
+        { y, c } =
             k
 
         d =
@@ -165,7 +172,7 @@ f =
                 """module A exposing (..)
 f =
     let
-        ( b, z ) =
+        ( z, b ) =
             j
 
         (Opaque a) =
@@ -174,7 +181,7 @@ f =
         d =
             l
 
-        { c, y } =
+        { y, c } =
             k
     in
     x
@@ -192,10 +199,10 @@ f =
         (Opaque a) =
             i
 
-        ( b, z ) =
+        ( z, b ) =
             j
 
-        { c, y } =
+        { y, c } =
             k
 
         d =
@@ -808,6 +815,1023 @@ f =
             b
     in
     x + y
+"""
+                        ]
+        ]
+
+
+glues : Test
+glues =
+    describe "glues"
+        [ glueHelpersBeforeTests
+        , glueHelpersAfterTests
+        , glueDependenciesBeforeFirstDependentTests
+        , glueDependenciesAfterFirstDependentTests
+        , glueDependenciesBeforeLastDependentTests
+        , glueDependenciesAfterLastDependentTests
+        ]
+
+
+glueHelpersBeforeTests : Test
+glueHelpersBeforeTests =
+    describe "glueHelpersBefore"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        calledInB =
+            foo
+
+        b =
+            bar calledInB
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is not helper if used in multiple funcs" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        calledInB =
+            foo
+
+        z =
+            zed
+
+        a =
+            foo calledInB
+
+        b =
+            bar calledInB
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is a helper if multiple bindings used in single binding" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        (help1, help2) =
+            foo
+
+        z =
+            zed
+
+        a =
+            foo
+
+        (y, b) =
+            bar help1 help2
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        (help1, help2) =
+            foo
+
+        (y, b) =
+            bar help1 help2
+    in
+    a + b
+"""
+                        ]
+        , test "does not glue to self" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        calledInB =
+            calledInB foo
+
+        b =
+            bar calledInB
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        dalledInB =
+            foo
+
+        a =
+            foo
+
+        b =
+            bar calledInB dalledInB
+
+        calledInB =
+            calledInB foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        calledInB =
+            calledInB foo
+
+        dalledInB =
+            foo
+
+        b =
+            bar calledInB dalledInB
+    in
+    a + b
+"""
+                        ]
+        , test "chains properly and ignores mutual dependencies" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo
+
+        mutualDep3 =
+            mutualDep1
+
+        b =
+            bar calledInB
+
+        mutualDep2 =
+            bar mutualDep3
+
+        calledInBHelp =
+            bar
+
+        mutualDep1 =
+            mutualDep2
+
+        z =
+            zed
+
+        calledInB =
+            calledInBHelp foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        mutualDep1 =
+            mutualDep2
+
+        mutualDep2 =
+            bar mutualDep3
+
+        mutualDep3 =
+            mutualDep1
+
+        z =
+            zed
+
+        a =
+            foo
+
+        calledInBHelp =
+            bar
+
+        calledInB =
+            calledInBHelp foo
+
+        b =
+            bar calledInB
+    in
+    a + b
+"""
+                        ]
+        , test "handles mutual recursion when one is not viable for gluing" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            aHelp
+
+        aHelp =
+            a
+
+        b =
+            bar
+
+        z =
+            zed
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        aHelp =
+            a
+
+        a =
+            aHelp
+
+        b =
+            bar
+    in
+    a + b
+"""
+                        ]
+        ]
+
+
+glueHelpersAfterTests : Test
+glueHelpersAfterTests =
+    describe "glueHelpersAfter"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        b =
+            bar calledInB
+
+        calledInB =
+            foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is not helper if used in multiple funcs" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        calledInB =
+            foo
+
+        z =
+            zed
+
+        a =
+            foo calledInB
+
+        b =
+            bar calledInB
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "does not glue to self" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        b =
+            bar calledInB
+
+        calledInB =
+            calledInB foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        dalledInB =
+            foo
+
+        a =
+            foo
+
+        b =
+            bar calledInB dalledInB
+
+        calledInB =
+            calledInB foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            foo
+
+        b =
+            bar calledInB dalledInB
+
+        calledInB =
+            calledInB foo
+
+        dalledInB =
+            foo
+    in
+    a + b
+"""
+                        ]
+        , test "chains properly and ignores mutual dependencies" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo
+
+        mutualDep3 =
+            mutualDep1
+
+        b =
+            bar calledInB
+
+        mutualDep2 =
+            bar mutualDep3
+
+        calledInBHelp =
+            bar
+
+        mutualDep1 =
+            mutualDep2
+
+        z =
+            zed
+
+        calledInB =
+            calledInBHelp foo
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        mutualDep1 =
+            mutualDep2
+
+        mutualDep2 =
+            bar mutualDep3
+
+        mutualDep3 =
+            mutualDep1
+
+        z =
+            zed
+
+        a =
+            foo
+
+        b =
+            bar calledInB
+
+        calledInB =
+            calledInBHelp foo
+
+        calledInBHelp =
+            bar
+    in
+    a + b
+"""
+                        ]
+        , test "handles mutual recursion when one is not viable for gluing" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            aHelp
+
+        aHelp =
+            a
+
+        b =
+            bar
+
+        z =
+            zed
+    in
+    a + b
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+func =
+    let
+        z =
+            zed
+
+        a =
+            aHelp
+
+        aHelp =
+            a
+
+        b =
+            bar
+    in
+    a + b
+"""
+                        ]
+        ]
+
+
+glueDependenciesBeforeFirstDependentTests : Test
+glueDependenciesBeforeFirstDependentTests =
+    describe "glueDependenciesBeforeFirstDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        help =
+            foo
+
+        a =
+            foo help
+
+        b =
+            bar help
+
+        z =
+            zed help
+    in
+    a + b + z
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is not a dependency if in exactly one func" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo help
+
+        b =
+            bar
+
+        help =
+            foo
+
+        z =
+            zed
+    in
+    bar
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is a dependency if multiple bindings used in exactly one func each (not the same)" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        (helpA, helpB) =
+            foo
+
+        a =
+            foo helpA
+
+        b =
+            bar helpB
+
+        z =
+            zed
+    in
+    bar
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing (..)
+func =
+    let
+        help =
+            foo x
+
+        a =
+            foo help
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionFirst
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+func =
+    let
+        help =
+            foo x
+
+        a =
+            foo help
+
+        x =
+            y
+
+        b =
+            bar help x
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                        ]
+        ]
+
+
+glueDependenciesAfterFirstDependentTests : Test
+glueDependenciesAfterFirstDependentTests =
+    describe "glueDependenciesAfterFirstDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo help
+
+        help =
+            foo
+
+        b =
+            bar help
+
+        z =
+            zed help
+    in
+    a + b + z
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesAfterFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing (..)
+func =
+    let
+        help =
+            foo x
+
+        a =
+            foo help
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionFirst
+                            |> alphabetically
+                            |> glueDependenciesAfterFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+func =
+    let
+        a =
+            foo help
+
+        help =
+            foo x
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        z =
+            zed help y
+
+        y =
+            help
+    in
+    a
+"""
+                        ]
+        ]
+
+
+glueDependenciesBeforeLastDependentTests : Test
+glueDependenciesBeforeLastDependentTests =
+    describe "glueDependenciesBeforeLastDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo help
+
+        b =
+            bar help
+
+        help =
+            foo
+
+        z =
+            zed help
+    in
+    a + b + z
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing (..)
+func =
+    let
+        help =
+            foo x
+
+        a =
+            foo help
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionFirst
+                            |> alphabetically
+                            |> glueDependenciesBeforeLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+func =
+    let
+        a =
+            foo help
+
+        x =
+            y
+
+        b =
+            bar help x
+
+        help =
+            foo x
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                        ]
+        ]
+
+
+glueDependenciesAfterLastDependentTests : Test
+glueDependenciesAfterLastDependentTests =
+    describe "glueDependenciesAfterLastDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing (..)
+
+func =
+    let
+        a =
+            foo help
+
+        b =
+            bar help
+
+        z =
+            zed help
+
+        help =
+            foo
+    in
+    a + b + z
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionLast
+                            |> alphabetically
+                            |> glueDependenciesAfterLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing (..)
+func =
+    let
+        help =
+            foo x
+
+        a =
+            foo help
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        y =
+            help
+
+        z =
+            zed help y
+    in
+    a
+"""
+                    |> Review.Test.run
+                        (sortLetDeclarations
+                            |> usedInExpressionFirst
+                            |> alphabetically
+                            |> glueDependenciesAfterLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+func =
+    let
+        a =
+            foo help
+
+        b =
+            bar help x
+
+        x =
+            y
+
+        z =
+            zed help y
+
+        help =
+            foo x
+
+        y =
+            help
+    in
+    a
 """
                         ]
         ]

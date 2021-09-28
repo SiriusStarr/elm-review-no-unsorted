@@ -2,6 +2,7 @@ module NoUnsortedTopLevelDeclarations exposing
     ( rule
     , RuleConfig, sortTopLevelDeclarations
     , alphabetically, exposedOrderWithPrivateLast, exposedOrderWithPrivateFirst, typesFirst, typesLast, portsFirst, portsLast
+    , glueHelpersBefore, glueHelpersAfter, glueDependenciesBeforeFirstDependent, glueDependenciesAfterFirstDependent, glueDependenciesAfterLastDependent, glueDependenciesBeforeLastDependent
     )
 
 {-|
@@ -21,6 +22,23 @@ module NoUnsortedTopLevelDeclarations exposing
 
 @docs alphabetically, exposedOrderWithPrivateLast, exposedOrderWithPrivateFirst, typesFirst, typesLast, portsFirst, portsLast
 
+
+## Glues
+
+Glues provide a way to "stick" one declaration to another, i.e. to always sort
+one declaration alongside another. Note that glues will chain, i.e. if `a` is
+glued before `b` and `b` is glued after `c`, then the result will be `c` -> `a`
+-> `b` (sorted wherever `c` is sorted to). Glues behave in the following ways:
+
+  - If multiple glues are specified, the first specified will be used.
+  - If multiple declarations are glued at the same place, they will be ordered
+    by the orderings specified.
+  - If glues are not acyclic (i.e. two declarations are glued to each other,
+    possibly via intermediates), then all of the involved declarations will not
+    be glued and will be sorted normally.
+
+@docs glueHelpersBefore, glueHelpersAfter, glueDependenciesBeforeFirstDependent, glueDependenciesAfterFirstDependent, glueDependenciesAfterLastDependent, glueDependenciesBeforeLastDependent
+
 -}
 
 import Elm.Syntax.Declaration exposing (Declaration(..))
@@ -30,8 +48,9 @@ import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Range as Range exposing (Range)
 import List.Extra as ListX
 import Review.Rule as Rule exposing (Error, Rule)
+import Set exposing (Set)
 import String.Extra as StringX
-import Util exposing (checkSorting)
+import Util exposing (GluedTo(..), checkSortingWithGlue, findAllNamesIn, findDependencies, validate)
 
 
 {-| Reports top-level declarations that are not in the "proper" order.
@@ -134,7 +153,20 @@ rule : RuleConfig r -> Rule
 rule (RuleConfig r) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoUnsortedTopLevelDeclarations" initialContext
         |> Rule.withModuleDefinitionVisitor (\m c -> ( [], getModuleExports m c ))
-        |> Rule.withDeclarationListVisitor (\ds c -> ( declarationVisitor (RuleConfig { r | sortBy = List.reverse r.sortBy }) ds c, c ))
+        |> Rule.withDeclarationListVisitor
+            (\ds c ->
+                ( declarationVisitor
+                    (RuleConfig
+                        { r
+                            | glues = List.reverse r.glues
+                            , sortBy = List.reverse r.sortBy
+                        }
+                    )
+                    ds
+                    c
+                , c
+                )
+            )
         |> Rule.fromModuleRuleSchema
 
 
@@ -144,6 +176,7 @@ rule (RuleConfig r) =
 type RuleConfig r
     = RuleConfig
         { sortBy : List (TLD -> TLD -> Order)
+        , glues : List Glue
         }
 
 
@@ -156,17 +189,25 @@ type alias Context =
     }
 
 
+{-| Given a `TLD` and a list of other `TLD`s,
+-}
+type alias Glue =
+    ( Int, TLD ) -> List TLD -> Maybe GluedTo
+
+
 {-| Information about a TLD.
 -}
 type alias TLD =
     { type_ : DeclarationType
-    , name : String
+    , namesBound : Set String
     , exposedOrder : Maybe Int
     , range : Range
+    , dependentOnBindings : Set String
+    , glued : Maybe GluedTo
     }
 
 
-{-| The ype of TLD it is.
+{-| The type of TLD it is.
 -}
 type DeclarationType
     = Function
@@ -177,9 +218,9 @@ type DeclarationType
 {-| Create a new `RuleConfig`. Use the various orderings to then specify
 primary and fallback orderings.
 -}
-sortTopLevelDeclarations : RuleConfig { noAlphabetical : (), noExposed : (), noType : (), noPort : () }
+sortTopLevelDeclarations : RuleConfig { noAlphabetical : (), noDependency : (), noExposed : (), noHelper : (), noType : (), noPort : () }
 sortTopLevelDeclarations =
-    RuleConfig { sortBy = [] }
+    RuleConfig { sortBy = [], glues = [] }
 
 
 {-| Sort declarations alphabetically. Note that this decapitalizes the first
@@ -207,7 +248,7 @@ alphabetically (RuleConfig r) =
     RuleConfig
         { r
             | sortBy =
-                (\d1 d2 -> compare (StringX.decapitalize d1.name) (StringX.decapitalize d2.name))
+                (\d1 d2 -> compare (Set.toList <| Set.map StringX.decapitalize d1.namesBound) (Set.toList <| Set.map StringX.decapitalize d2.namesBound))
                     :: r.sortBy
         }
 
@@ -498,6 +539,240 @@ portsLast (RuleConfig r) =
         }
 
 
+{-| Dependencies are _unexposed_ functions that are used in multiple other
+functions. This glue attaches them immediately before the first function they
+are used in.
+
+For example:
+
+    unwrap =
+        some func
+
+    a x =
+        unwrap x
+
+    b x =
+        unwrap x
+
+    c x =
+        unwrap x
+
+-}
+glueDependenciesBeforeFirstDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesBeforeFirstDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be dependencies
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedBeforeFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are _unexposed_ functions that are used in multiple other
+functions. This glue attaches them immediately after the first function they
+are used in.
+
+For example:
+
+    a x =
+        unwrap x
+
+    unwrap =
+        some func
+
+    b x =
+        unwrap x
+
+    c x =
+        unwrap x
+
+-}
+glueDependenciesAfterFirstDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesAfterFirstDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be dependencies
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedAfterFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are _unexposed_ functions that are used in multiple other
+functions. This glue attaches them immediately before the last function they
+are used in.
+
+For example:
+
+    a x =
+        unwrap x
+
+    b x =
+        unwrap x
+
+    unwrap =
+        some func
+
+    c x =
+        unwrap x
+
+-}
+glueDependenciesBeforeLastDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesBeforeLastDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be dependencies
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedBeforeLast << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are _unexposed_ functions that are used in multiple other
+functions. This glue attaches them immediately after the last function they
+are used in.
+
+For example:
+
+    a x =
+        unwrap x
+
+    b x =
+        unwrap x
+
+    c x =
+        unwrap x
+
+    unwrap =
+        some func
+
+-}
+glueDependenciesAfterLastDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesAfterLastDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be dependencies
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedAfterLast << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Helpers are _unexposed_ functions that are used in exactly one other
+function. This glue attaches them immediately before the function they are used
+in.
+
+For example:
+
+    foldrHelper : (a -> b -> b) -> b -> Int -> List a -> b
+    foldrHelper fn acc ctr ls =
+        case ls of
+            [] ->
+                acc
+
+            a :: r1 ->
+                ...
+
+    {-| Reduce a list from the right.
+    -}
+    foldr : (a -> b -> b) -> b -> List a -> b
+    foldr fn acc ls =
+        foldrHelper fn acc 0 ls
+
+-}
+glueHelpersBefore : RuleConfig { r | noHelper : () } -> RuleConfig r
+glueHelpersBefore (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be helpers
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate ((==) 1 << Tuple.second)
+                            |> Maybe.map (GluedBeforeFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Helpers are _unexposed_ functions that are used in exactly one other
+function. This glue attaches them immediately after the function they are used
+in.
+
+For example:
+
+    {-| Reduce a list from the right.
+    -}
+    foldr : (a -> b -> b) -> b -> List a -> b
+    foldr fn acc ls =
+        foldrHelper fn acc 0 ls
+
+    foldrHelper : (a -> b -> b) -> b -> Int -> List a -> b
+    foldrHelper fn acc ctr ls =
+        case ls of
+            [] ->
+                acc
+
+            a :: r1 ->
+                ...
+
+-}
+glueHelpersAfter : RuleConfig { r | noHelper : () } -> RuleConfig r
+glueHelpersAfter (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only unexposed can be helpers
+                    if d.exposedOrder == Nothing then
+                        findDependencies ( i, d ) ds
+                            |> validate ((==) 1 << Tuple.second)
+                            |> Maybe.map (GluedAfterFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
 {-| Create a context with a source extractor.
 -}
 initialContext : Rule.ContextCreator () Context
@@ -564,9 +839,15 @@ getModuleExports m context =
 {-| Generate declaration info for all TLDs and then check that they are sorted.
 -}
 declarationVisitor : RuleConfig r -> List (Node Declaration) -> Context -> List (Error {})
-declarationVisitor (RuleConfig { sortBy }) ds context =
-    List.filterMap (getDecInfo context.exports) ds
-        |> checkSorting context.extractSource "Top-level declarations" sortBy context.errorRange
+declarationVisitor (RuleConfig { glues, sortBy }) decs context =
+    let
+        applyGlues : List TLD -> Int -> TLD -> TLD
+        applyGlues ds i d =
+            { d | glued = ListX.findMap (\g -> g ( i, d ) ds) glues }
+    in
+    List.filterMap (getDecInfo context.exports) decs
+        |> (\ds -> List.indexedMap (applyGlues ds) ds)
+        |> checkSortingWithGlue context.extractSource "Top-level declarations" sortBy context.errorRange
 
 
 {-| Given a list of module exports, generate TLD info from a `declaration`.
@@ -576,13 +857,13 @@ getDecInfo exports d =
     case Node.value d of
         FunctionDeclaration { declaration } ->
             Node.value declaration
-                |> .name
-                |> Node.value
-                |> (\name ->
+                |> (\{ name, expression } ->
                         { type_ = Function
-                        , exposedOrder = Maybe.andThen (ListX.elemIndex name) exports
-                        , name = name
+                        , exposedOrder = Maybe.andThen (ListX.elemIndex <| Node.value name) exports
+                        , namesBound = Set.singleton <| Node.value name
                         , range = Node.range d
+                        , glued = Nothing
+                        , dependentOnBindings = findAllNamesIn expression
                         }
                    )
                 |> Just
@@ -591,25 +872,31 @@ getDecInfo exports d =
             Just
                 { type_ = Type
                 , exposedOrder = Maybe.andThen (ListX.elemIndex (Node.value name)) exports
-                , name = Node.value name
+                , namesBound = Set.singleton <| Node.value name
                 , range = Node.range d
+                , glued = Nothing
+                , dependentOnBindings = Set.empty
                 }
 
         CustomTypeDeclaration { name } ->
             Just
                 { type_ = Type
                 , exposedOrder = Maybe.andThen (ListX.elemIndex (Node.value name)) exports
-                , name = Node.value name
+                , namesBound = Set.singleton <| Node.value name
                 , range = Node.range d
+                , glued = Nothing
+                , dependentOnBindings = Set.empty
                 }
 
         PortDeclaration { name } ->
             Just
                 { type_ = Port
-                , name = Node.value name
+                , namesBound = Set.singleton <| Node.value name
                 , range = Node.range d
+                , glued = Nothing
 
-                -- Ports can't be exposed
+                -- Ports can't be exposed or dependent on other TLDs
+                , dependentOnBindings = Set.empty
                 , exposedOrder = Nothing
                 }
 

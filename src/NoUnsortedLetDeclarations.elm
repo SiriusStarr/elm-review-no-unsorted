@@ -2,6 +2,7 @@ module NoUnsortedLetDeclarations exposing
     ( rule
     , RuleConfig, sortLetDeclarations
     , alphabetically, usedInExpressionFirst, usedInExpressionLast, usedInOtherDeclarationsLast, usedInOtherDeclarationsFirst, valuesBeforeFunctions, valuesAfterFunctions
+    , glueHelpersBefore, glueHelpersAfter, glueDependenciesBeforeFirstDependent, glueDependenciesAfterFirstDependent, glueDependenciesBeforeLastDependent, glueDependenciesAfterLastDependent
     )
 
 {-|
@@ -21,6 +22,23 @@ module NoUnsortedLetDeclarations exposing
 
 @docs alphabetically, usedInExpressionFirst, usedInExpressionLast, usedInOtherDeclarationsLast, usedInOtherDeclarationsFirst, valuesBeforeFunctions, valuesAfterFunctions
 
+
+## Glues
+
+Glues provide a way to "stick" one declaration to another, i.e. to always sort
+one declaration alongside another. Note that glues will chain, i.e. if `a` is
+glued before `b` and `b` is glued after `c`, then the result will be `c` -> `a`
+-> `b` (sorted wherever `c` is sorted to). Glues behave in the following ways:
+
+  - If multiple glues are specified, the first specified will be used.
+  - If multiple declarations are glued at the same place, they will be ordered
+    by the orderings specified.
+  - If glues are not acyclic (i.e. two declarations are glued to each other,
+    possibly via intermediates), then all of the involved declarations will not
+    be glued and will be sorted normally.
+
+@docs glueHelpersBefore, glueHelpersAfter, glueDependenciesBeforeFirstDependent, glueDependenciesAfterFirstDependent, glueDependenciesBeforeLastDependent, glueDependenciesAfterLastDependent
+
 -}
 
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -28,7 +46,8 @@ import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Range exposing (Range)
 import List.Extra as ListX
 import Review.Rule as Rule exposing (Error, Rule)
-import Util exposing (allBindingsInPattern, checkSorting, countUsesIn)
+import Set exposing (Set)
+import Util exposing (GluedTo(..), allBindingsInPattern, checkSortingWithGlue, countUsesIn, findAllNamesIn, findDependencies, validate)
 
 
 {-| Reports `let` declarations that are not in the "proper" order.
@@ -130,7 +149,20 @@ rule : RuleConfig r -> Rule
 rule (RuleConfig r) =
     Rule.newModuleRuleSchemaUsingContextCreator "NoUnsortedLetDeclarations" initialContext
         -- Reverse sort order, as we've been cons-ing them on
-        |> Rule.withExpressionEnterVisitor (\e c -> ( expressionVisitor (RuleConfig { r | sortBy = List.reverse r.sortBy }) e c, c ))
+        |> Rule.withExpressionEnterVisitor
+            (\e c ->
+                ( expressionVisitor
+                    (RuleConfig
+                        { r
+                            | glues = List.reverse r.glues
+                            , sortBy = List.reverse r.sortBy
+                        }
+                    )
+                    e
+                    c
+                , c
+                )
+            )
         |> Rule.fromModuleRuleSchema
 
 
@@ -156,38 +188,46 @@ orderings to create a hierarchy of sorting.
 type RuleConfig r
     = RuleConfig
         { sortBy : List (LetDec -> LetDec -> Order)
+        , glues : List Glue
         }
+
+
+{-| Given a `LetDec` and a list of other `LetDec`s,
+-}
+type alias Glue =
+    ( Int, LetDec ) -> List LetDec -> Maybe GluedTo
 
 
 {-| A `let` declaration, parsed for full information.
 -}
 type alias LetDec =
     { range : Range
-    , index : Int
-    , namesBound : List String
+    , namesBound : Set String
     , usedInExpression : Bool
+    , dependentOnBindings : Set String
     , usedInOtherDecs : Bool
     , args : List String
+    , glued : Maybe GluedTo
     }
 
 
 {-| Create a new `RuleConfig`. Use the various orderings to then specify
 primary and fallback orderings.
 -}
-sortLetDeclarations : RuleConfig { noAlphabetical : (), noArgCount : (), noUsedInOther : (), noUsedInExpression : () }
+sortLetDeclarations : RuleConfig { noAlphabetical : (), noArgCount : (), noDependency : (), noHelper : (), noUsedInOther : (), noUsedInExpression : () }
 sortLetDeclarations =
-    RuleConfig { sortBy = [] }
+    RuleConfig { sortBy = [], glues = [] }
 
 
 {-| Sort declarations alphabetically by the name of their binding. For
 destructurings, this will be the name of the actual bindings that are made, in
-order. For example, the following is sorted alphabetically:
+alphabetical order. For example, the following is sorted alphabetically:
 
     let
         (Opaque a) =
             i
 
-        ( b, z ) =
+        ( z, b ) =
             j
 
         { c, y } =
@@ -204,7 +244,7 @@ alphabetically (RuleConfig r) =
     RuleConfig
         { r
             | sortBy =
-                (\d1 d2 -> compare d1.namesBound d2.namesBound)
+                (\d1 d2 -> compare (Set.toList d1.namesBound) (Set.toList d2.namesBound))
                     :: r.sortBy
         }
 
@@ -461,15 +501,259 @@ valuesAfterFunctions (RuleConfig r) =
         }
 
 
+{-| Helpers are declarations that are _not_ used in the expression that are used
+in exactly one other declaration. This glue attaches them immediately before the
+declaration they are used in.
+
+For example:
+
+    foo input =
+        let
+            step : Int -> Int -> Int
+            step i acc =
+                i + acc
+
+            sum : Int
+            sum =
+                List.foldl step 0 input
+        in
+        sum + 1
+
+-}
+glueHelpersBefore : RuleConfig { r | noHelper : () } -> RuleConfig r
+glueHelpersBefore (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be helpers
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate ((==) 1 << Tuple.second)
+                            |> Maybe.map (GluedBeforeFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Helpers are declarations that are _not_ used in the expression that are used
+in exactly one other declaration. This glue attaches them immediately after the
+declaration they are used in.
+
+For example:
+
+    foo input =
+        let
+            sum : Int
+            sum =
+                List.foldl step 0 input
+
+            step : Int -> Int -> Int
+            step i acc =
+                i + acc
+        in
+        sum + 1
+
+-}
+glueHelpersAfter : RuleConfig { r | noHelper : () } -> RuleConfig r
+glueHelpersAfter (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be helpers
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate ((==) 1 << Tuple.second)
+                            |> Maybe.map (GluedAfterFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are declarations that are _not_ used in the expression that are
+used in multiple other declarations. This glue attaches them immediately before
+the first declaration they are used in.
+
+For example:
+
+    foo =
+        let
+            unwrap =
+                some func
+
+            a x =
+                unwrap x
+
+            b x =
+                unwrap x
+
+            c x =
+                unwrap x
+        in
+        bar
+
+-}
+glueDependenciesBeforeFirstDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesBeforeFirstDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be dependencies
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedBeforeFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are declarations that are _not_ used in the expression that are
+used in multiple other declarations. This glue attaches them immediately after
+the first declaration they are used in.
+
+For example:
+
+    foo =
+        let
+            a x =
+                unwrap x
+
+            unwrap =
+                some func
+
+            b x =
+                unwrap x
+
+            c x =
+                unwrap x
+        in
+        bar
+
+-}
+glueDependenciesAfterFirstDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesAfterFirstDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be dependencies
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedAfterFirst << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are declarations that are _not_ used in the expression that are
+used in multiple other declarations. This glue attaches them immediately before
+the last declaration they are used in.
+
+For example:
+
+    foo =
+        let
+            a x =
+                unwrap x
+
+            b x =
+                unwrap x
+
+            unwrap =
+                some func
+
+            c x =
+                unwrap x
+        in
+        bar
+
+-}
+glueDependenciesBeforeLastDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesBeforeLastDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be dependencies
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedBeforeLast << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
+{-| Dependencies are declarations that are _not_ used in the expression that are
+used in multiple other declarations. This glue attaches them immediately after
+the last declaration they are used in.
+
+For example:
+
+    foo =
+        let
+            a x =
+                unwrap x
+
+            b x =
+                unwrap x
+
+            c x =
+                unwrap x
+
+            unwrap =
+                some func
+        in
+        bar
+
+-}
+glueDependenciesAfterLastDependent : RuleConfig { r | noDependency : () } -> RuleConfig r
+glueDependenciesAfterLastDependent (RuleConfig r) =
+    RuleConfig
+        { r
+            | glues =
+                (\( i, d ) ds ->
+                    -- Only decs not used in expression can be dependencies
+                    if d.usedInExpression == False then
+                        findDependencies ( i, d ) ds
+                            |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
+                            |> Maybe.map (GluedAfterLast << Tuple.first)
+
+                    else
+                        Nothing
+                )
+                    :: r.glues
+        }
+
+
 {-| Visit expressions, checking `let` blocks for sorting.
 -}
 expressionVisitor : RuleConfig r -> Node Expression -> Context -> List (Error {})
-expressionVisitor (RuleConfig { sortBy }) n context =
+expressionVisitor (RuleConfig { glues, sortBy }) n context =
     case Node.value n of
         LetExpression lb ->
             let
                 ( exprsToDecs, exprs ) =
-                    ListX.indexedFoldl step ( [], [] ) lb.declarations
+                    List.foldl step ( [], [] ) lb.declarations
 
                 errorRange : Range
                 errorRange =
@@ -482,11 +766,10 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                     { r | end = { row = r.start.row, column = r.start.column + 3 } }
 
                 step :
-                    Int
-                    -> Node LetDeclaration
+                    Node LetDeclaration
                     -> ( List (List (Node Expression) -> LetDec), List (Node Expression) )
                     -> ( List (List (Node Expression) -> LetDec), List (Node Expression) )
-                step index d ( dAcc, eAcc ) =
+                step d ( dAcc, eAcc ) =
                     case Node.value d of
                         LetFunction { declaration } ->
                             let
@@ -499,11 +782,12 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                             in
                             ( (\es ->
                                 { range = Node.range d
-                                , index = index
-                                , namesBound = [ name ]
+                                , namesBound = Set.singleton name
                                 , usedInExpression = countUsesIn lb.expression name >= 1
                                 , usedInOtherDecs = List.any (\e -> countUsesIn e name >= 1) es
                                 , args = List.concatMap allBindingsInPattern arguments
+                                , glued = Nothing
+                                , dependentOnBindings = findAllNamesIn expression
                                 }
                               )
                                 :: dAcc
@@ -518,19 +802,25 @@ expressionVisitor (RuleConfig { sortBy }) n context =
                             in
                             ( (\es ->
                                 { range = Node.range d
-                                , index = index
-                                , namesBound = bs
+                                , namesBound = Set.fromList bs
                                 , usedInExpression = List.any ((<) 0 << countUsesIn lb.expression) bs
                                 , usedInOtherDecs = List.any (\e -> List.any ((<) 0 << countUsesIn e) bs) es
                                 , args = []
+                                , glued = Nothing
+                                , dependentOnBindings = findAllNamesIn expression
                                 }
                               )
                                 :: dAcc
                             , expression :: eAcc
                             )
+
+                applyGlues : List LetDec -> Int -> LetDec -> LetDec
+                applyGlues ds i d =
+                    { d | glued = ListX.findMap (\g -> g ( i, d ) ds) glues }
             in
             ListX.reverseMap ((|>) exprs) exprsToDecs
-                |> checkSorting context.extractSource "Let declarations" sortBy errorRange
+                |> (\ds -> List.indexedMap (applyGlues ds) ds)
+                |> checkSortingWithGlue context.extractSource "Let declarations" sortBy errorRange
 
         _ ->
             []

@@ -1,15 +1,31 @@
-module Util exposing (allBindingsInPattern, checkSorting, countUsesIn, fallbackCompareFor, makeAccessFunc, validate)
+module Util exposing
+    ( GluedTo(..)
+    , allBindingsInPattern
+    , checkSorting
+    , checkSortingWithGlue
+    , countUsesIn
+    , fallbackCompareFor
+    , findAllNamesIn
+    , findDependencies
+    , makeAccessFunc
+    , validate
+    )
 
 {-| Utility functions used by other modules but not specific to them.
 -}
 
+import Dict exposing (Dict)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
+import Graph exposing (AcyclicGraph, Edge, Graph, NodeContext)
 import List.Extra as ListX
+import Maybe.Extra as MaybeX
+import Result.Extra as ResultX
 import Review.Fix as Fix exposing (Fix)
 import Review.Rule as Rule exposing (Error)
+import Set exposing (Set)
 
 
 {-| Get all immediate child expressions of an expression.
@@ -179,6 +195,20 @@ countUsesIn expr name =
                 |> List.foldl (\e -> (+) (countUsesIn e name)) 0
 
 
+{-| Find all (local) names used in an expression.
+-}
+findAllNamesIn : Node Expression -> Set String
+findAllNamesIn expr =
+    case Node.value expr of
+        -- If the name is qualified, it isn't a variable
+        FunctionOrValue [] n ->
+            Set.singleton n
+
+        _ ->
+            subexpressions expr
+                |> List.foldl (\e -> Set.union (findAllNamesIn e)) Set.empty
+
+
 {-| Use the first order, or use the second order if the first is `EQ`. This is
 lazy in the second comparison and written for use in pipeline-style code, e.g.
 in implementing a stable sort below:
@@ -230,21 +260,6 @@ and generate errors if it isn't.
 checkSorting : (Range -> String) -> String -> List ({ a | range : Range } -> { a | range : Range } -> Order) -> Range -> List { a | range : Range } -> List (Error {})
 checkSorting extractSource errorConcerns orderings errorRange ds =
     let
-        comp : { a | range : Range } -> { a | range : Range } -> Order
-        comp d1 d2 =
-            let
-                go : List ({ a | range : Range } -> { a | range : Range } -> Order) -> Order
-                go os =
-                    case os of
-                        [] ->
-                            EQ
-
-                        o :: os_ ->
-                            (\() -> go os_)
-                                |> fallbackCompareFor (o d1 d2)
-            in
-            go orderings
-
         indexed : List ( Int, { a | range : Range } )
         indexed =
             List.indexedMap Tuple.pair ds
@@ -253,7 +268,7 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
         (\( i1, d1 ) ( i2, d2 ) ->
             -- Sort stably
             (\() -> compare i1 i2)
-                |> fallbackCompareFor (comp d1 d2)
+                |> fallbackCompareFor (compareByOrderings orderings d1 d2)
         )
         indexed
         -- Check if sorted
@@ -268,6 +283,247 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
                 else
                     []
            )
+
+
+{-| Given a list of ordering functions for breaking ties, order to things.
+-}
+compareByOrderings : List (a -> a -> Order) -> a -> a -> Order
+compareByOrderings orderings d1 d2 =
+    let
+        go : List (a -> a -> Order) -> Order
+        go os =
+            case os of
+                [] ->
+                    EQ
+
+                o :: os_ ->
+                    (\() -> go os_)
+                        |> fallbackCompareFor (o d1 d2)
+    in
+    go orderings
+
+
+{-| Specify how something is glued to another (by name).
+-}
+type GluedTo
+    = GluedBeforeFirst (Set String)
+    | GluedAfterFirst (Set String)
+    | GluedBeforeLast (Set String)
+    | GluedAfterLast (Set String)
+
+
+{-| Given context and a list of ordering functions, check if a list is sorted
+and generate errors if it isn't.
+-}
+checkSortingWithGlue : (Range -> String) -> String -> List ({ a | namesBound : Set String, glued : Maybe GluedTo, range : Range } -> { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } -> Order) -> Range -> List { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } -> List (Error {})
+checkSortingWithGlue extractSource errorConcerns orderings errorRange ds =
+    let
+        insertGlued : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) -> Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } -> { toGlue : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }), inserted : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) }
+        insertGlued glued ({ label } as dec) =
+            -- Keep only glued that are glued to this name
+            List.partition
+                (.label
+                    >> .glued
+                    >> MaybeX.unwrap False (not << Set.isEmpty << Set.intersect label.namesBound << gluedTo)
+                )
+                glued
+                -- Split into glued before and after
+                |> Tuple.mapFirst (List.partition (MaybeX.unwrap False isGluedBefore << .glued << .label))
+                -- Flatten
+                |> (\( ( gluedBefore, gluedAfter ), toGlue ) -> { toGlue = toGlue, inserted = gluedBefore ++ dec :: gluedAfter })
+
+        indexed : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
+        indexed =
+            List.indexedMap (\i d -> { id = i, label = d }) ds
+
+        sort : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) -> List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
+        sort =
+            List.sortWith
+                (\d1 d2 ->
+                    -- Sort stably
+                    (\() -> compare d1.id d2.id)
+                        |> fallbackCompareFor (compareByOrderings orderings d1.label d2.label)
+                )
+
+        glueLevel : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) -> List (List (NodeContext { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } ())) -> List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
+        glueLevel sorted glued =
+            case glued of
+                [] ->
+                    sorted
+
+                g :: gs ->
+                    let
+                        asList : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
+                        asList =
+                            List.map .node g
+                                |> sort
+                    in
+                    (if List.isEmpty sorted then
+                        -- Initial unglued items
+                        asList
+
+                     else
+                        -- Glue items
+                        List.partition (MaybeX.unwrap False isGluedToFirst << .glued << .label) asList
+                            |> (\( toFirst, toLast ) ->
+                                    List.foldl
+                                        (\d { toGlue, inserted } ->
+                                            insertGlued toGlue d
+                                                |> (\r -> { r | inserted = inserted ++ r.inserted })
+                                        )
+                                        { toGlue = toFirst, inserted = [] }
+                                        sorted
+                                        |> .inserted
+                                        |> List.foldr
+                                            (\d { toGlue, inserted } ->
+                                                insertGlued toGlue d
+                                                    |> (\r -> { r | inserted = r.inserted ++ inserted })
+                                            )
+                                            { toGlue = toLast, inserted = [] }
+                                        |> .inserted
+                               )
+                    )
+                        |> (\sorted_ -> glueLevel sorted_ gs)
+    in
+    gluedListToDAG indexed
+        -- Sort by dependency (gluing)
+        |> Graph.heightLevels
+        -- Glue each level
+        |> glueLevel []
+        -- Check if sorted
+        |> (\sorted ->
+                if List.map .id sorted /= List.map .id indexed then
+                    -- Generate a fix if unsorted
+                    List.map (\{ id, label } -> ( id, label.range )) sorted
+                        |> createFix extractSource
+                        |> unsortedError errorConcerns errorRange
+                        |> List.singleton
+
+                else
+                    []
+           )
+
+
+{-| Extract what names something is glued to.
+-}
+gluedTo : GluedTo -> Set String
+gluedTo g =
+    case g of
+        GluedBeforeFirst ns ->
+            ns
+
+        GluedAfterFirst ns ->
+            ns
+
+        GluedBeforeLast ns ->
+            ns
+
+        GluedAfterLast ns ->
+            ns
+
+
+{-| Check if something is glued to the first or last of its glued list.
+-}
+isGluedToFirst : GluedTo -> Bool
+isGluedToFirst g =
+    case g of
+        GluedBeforeFirst _ ->
+            True
+
+        GluedAfterFirst _ ->
+            True
+
+        GluedBeforeLast _ ->
+            False
+
+        GluedAfterLast _ ->
+            False
+
+
+{-| Check if something is glued before or after that to which it is glued.
+-}
+isGluedBefore : GluedTo -> Bool
+isGluedBefore g =
+    case g of
+        GluedBeforeFirst _ ->
+            True
+
+        GluedAfterFirst _ ->
+            False
+
+        GluedBeforeLast _ ->
+            True
+
+        GluedAfterLast _ ->
+            False
+
+
+{-| Given a list of glued TLDs, remove any glues that are cyclic by converting
+it to a directed acyclic graph, where edges indicate gluing dependencies (i.e.
+A -> B means B is glued to A).
+-}
+gluedListToDAG : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo }) -> AcyclicGraph { a | namesBound : Set String, glued : Maybe GluedTo } ()
+gluedListToDAG ds =
+    let
+        namesToNodeId : Dict String Int
+        namesToNodeId =
+            List.concatMap (\{ id, label } -> List.map (\n -> ( n, id )) <| Set.toList label.namesBound) ds
+                |> Dict.fromList
+
+        edges : List (Edge ())
+        edges =
+            -- There can be duplicate edges, but that is fine, since the graph only keeps one
+            List.concatMap
+                (\{ id, label } ->
+                    MaybeX.unwrap [] (Set.toList << gluedTo) label.glued
+                        |> List.filterMap
+                            (\n ->
+                                Dict.get n namesToNodeId
+                                    |> Maybe.map (\from -> { from = from, to = id, label = () })
+                            )
+                )
+                ds
+
+        eliminateCycles : Graph { a | namesBound : Set String, glued : Maybe GluedTo } () -> AcyclicGraph { a | namesBound : Set String, glued : Maybe GluedTo } ()
+        eliminateCycles g =
+            -- Check if it is acyclic
+            Graph.stronglyConnectedComponents g
+                |> ResultX.extract
+                    -- IF not, get all edges between strongly-connected nodes
+                    (List.concatMap (List.map (\{ from, to } -> ( from, to )) << Graph.edges)
+                        >> Set.fromList
+                        >> (\toRemove ->
+                                -- Eliminate edges and rebuild graph
+                                Graph.edges g
+                                    |> List.map (\{ from, to } -> ( from, to ))
+                                    |> Set.fromList
+                                    |> (\initEdges -> Set.diff initEdges toRemove)
+                                    |> Set.toList
+                                    |> List.map (\( from, to ) -> { from = from, to = to, label = () })
+                                    |> Graph.fromNodesAndEdges ds
+                                    |> eliminateCycles
+                           )
+                    )
+    in
+    Graph.fromNodesAndEdges ds edges
+        |> eliminateCycles
+
+
+{-| Find all dependencies of a declaration.
+-}
+findDependencies : ( Int, { a | dependentOnBindings : Set String, namesBound : Set String } ) -> List { a | dependentOnBindings : Set String, namesBound : Set String } -> ( Set String, Int )
+findDependencies ( decI, d ) ds =
+    ListX.indexedFoldl
+        (\i { dependentOnBindings, namesBound } (( glueAcc, numberUsedIn ) as acc) ->
+            -- Cannot glue to itself
+            if i == decI || (Set.isEmpty <| Set.intersect d.namesBound dependentOnBindings) then
+                acc
+
+            else
+                ( Set.union glueAcc namesBound, numberUsedIn + 1 )
+        )
+        ( Set.empty, 0 )
+        ds
 
 
 {-| Given a range and a fix, create an unsorted case error.

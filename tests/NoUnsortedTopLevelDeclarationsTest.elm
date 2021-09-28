@@ -5,6 +5,12 @@ import NoUnsortedTopLevelDeclarations
         ( alphabetically
         , exposedOrderWithPrivateFirst
         , exposedOrderWithPrivateLast
+        , glueDependenciesAfterFirstDependent
+        , glueDependenciesAfterLastDependent
+        , glueDependenciesBeforeFirstDependent
+        , glueDependenciesBeforeLastDependent
+        , glueHelpersAfter
+        , glueHelpersBefore
         , portsFirst
         , portsLast
         , rule
@@ -21,6 +27,7 @@ all =
     describe "NoUnsortedTopLevelDeclarations"
         [ passes
         , orderings
+        , glues
         ]
 
 
@@ -920,6 +927,1246 @@ c =
     bar
 
 port b: String -> Cmd msg
+"""
+                        ]
+        ]
+
+
+glues : Test
+glues =
+    describe "glues"
+        [ glueHelpersBeforeTests
+        , glueHelpersAfterTests
+        , glueDependenciesBeforeFirstDependentTests
+        , glueDependenciesAfterFirstDependentTests
+        , glueDependenciesBeforeLastDependentTests
+        , glueDependenciesAfterLastDependentTests
+        ]
+
+
+glueHelpersBeforeTests : Test
+glueHelpersBeforeTests =
+    describe "glueHelpersBefore"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+calledInB =
+    foo
+
+b =
+    bar calledInB
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is not helper if used in multiple funcs" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo calledInB
+
+type alias Z =
+    A
+
+b =
+    bar calledInB
+
+calledInB =
+    foo
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "does not glue to self" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+calledInB =
+    calledInB
+
+b =
+    bar calledInB
+
+z =
+    z
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB dalledInB
+
+z =
+    zed
+
+dalledInB =
+    foo
+
+calledInB =
+    foo
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+calledInB =
+    foo
+
+dalledInB =
+    foo
+
+b =
+    bar calledInB dalledInB
+
+z =
+    zed
+"""
+                        ]
+        , test "chains properly and ignores mutual dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+mutualDep3 =
+    mutualDep1
+
+b =
+    bar calledInB
+
+mutualDep2 =
+    bar mutualDep3
+
+calledInBHelp =
+    bar
+
+mutualDep1 =
+    mutualDep2
+
+z =
+    zed
+
+calledInB =
+    calledInBHelp foo
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+calledInBHelp =
+    bar
+
+calledInB =
+    calledInBHelp foo
+
+b =
+    bar calledInB
+
+mutualDep1 =
+    mutualDep2
+
+mutualDep2 =
+    bar mutualDep3
+
+mutualDep3 =
+    mutualDep1
+
+z =
+    zed
+"""
+                        ]
+        , test "handles mutual recursion when one is not viable for gluing" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    aHelp
+
+aHelp =
+    a
+
+type alias Z =
+    A
+
+b =
+    bar
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+aHelp =
+    a
+
+a =
+    aHelp
+
+type alias Z =
+    A
+
+b =
+    bar
+
+z =
+    zed
+"""
+                        ]
+        ]
+
+
+glueHelpersAfterTests : Test
+glueHelpersAfterTests =
+    describe "glueHelpersAfter"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB
+
+calledInB =
+    foo
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB dalledInB
+
+z =
+    zed
+
+dalledInB =
+    foo
+
+calledInB =
+    foo
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB dalledInB
+
+calledInB =
+    foo
+
+dalledInB =
+    foo
+
+z =
+    zed
+"""
+                        ]
+        , test "chains properly and ignores mutual dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+mutualDep3 =
+    mutualDep1
+
+b =
+    bar calledInB
+
+mutualDep2 =
+    bar mutualDep3
+
+calledInBHelp =
+    bar
+
+mutualDep1 =
+    mutualDep2
+
+z =
+    zed
+
+calledInB =
+    calledInBHelp foo
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB
+
+calledInB =
+    calledInBHelp foo
+
+calledInBHelp =
+    bar
+
+mutualDep1 =
+    mutualDep2
+
+mutualDep2 =
+    bar mutualDep3
+
+mutualDep3 =
+    mutualDep1
+
+z =
+    zed
+"""
+                        ]
+        , test "handles mutual recursion when one is not viable for gluing" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    aHelp
+
+type alias Z =
+    A
+
+aHelp =
+    a
+
+b =
+    bar
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    aHelp
+
+aHelp =
+    a
+
+type alias Z =
+    A
+
+b =
+    bar
+
+z =
+    zed
+"""
+                        ]
+        ]
+
+
+glueDependenciesBeforeFirstDependentTests : Test
+glueDependenciesBeforeFirstDependentTests =
+    describe "glueDependenciesBeforeFirstDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "is not a dependency if in exactly one func" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar
+
+help =
+    foo
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo x
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help x
+
+x =
+    y
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed
+                                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo x
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+x =
+    y
+
+b =
+    bar help x
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                        ]
+        ]
+
+
+glueDependenciesAfterFirstDependentTests : Test
+glueDependenciesAfterFirstDependentTests =
+    describe "glueDependenciesAfterFirstDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+help =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo x
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help x
+
+x =
+    y
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed
+                                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+help =
+    foo x
+
+type alias Z =
+    A
+
+b =
+    bar help x
+
+x =
+    y
+
+z =
+    zed help y
+
+y =
+    help
+"""
+                        ]
+        ]
+
+
+glueDependenciesBeforeLastDependentTests : Test
+glueDependenciesBeforeLastDependentTests =
+    describe "glueDependenciesBeforeLastDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+help =
+    foo
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo x
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+x =
+    y
+
+b =
+    bar help x
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed
+                                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+x =
+    y
+
+b =
+    bar help x
+
+help =
+    foo x
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                        ]
+        ]
+
+
+glueDependenciesAfterLastDependentTests : Test
+glueDependenciesAfterLastDependentTests =
+    describe "glueDependenciesAfterLastDependent"
+        [ test "passes when ordered" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+
+help =
+    foo
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "fails when not ordered and removes cycles" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+help =
+    foo x
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+x =
+    y
+
+b =
+    bar help x
+
+y =
+    help
+
+z =
+    zed help y
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError False
+                            |> Review.Test.whenFixed
+                                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help x
+
+x =
+    y
+
+z =
+    zed help y
+
+help =
+    foo x
+
+y =
+    help
 """
                         ]
         ]
