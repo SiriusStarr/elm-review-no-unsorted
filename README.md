@@ -6,10 +6,10 @@ rules to ensure that anything (readily) sortable in Elm code is sorted in the
 
 ## Provided rules
 
-- [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.0/NoUnsortedCases) - Reports case patterns that are not in the "proper" order.
-- [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.0/NoUnsortedLetDeclarations) - Reports `let` declarations that are not in the "proper" order.
-- [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.0/NoUnsortedRecords) - Reports record fields that are not in the "proper" order.
-- [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.0/NoUnsortedTopLevelDeclarations) - Reports top-level declarations that are not in the "proper" order.
+* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.1/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
+* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.1/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
+* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.1/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
+* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.1/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
 
 ## Configuration
 
@@ -49,3 +49,9 @@ You can try the example configuration above out by running the following command
 ```bash
 elm-review --template SiriusStarr/elm-review-no-unsorted/example
 ```
+
+## Changlelog
+
+* `1.0.1` -- Fix crash in handling of generic records when not all fields must
+  be present.
+* `1.0.0` -- Initial release
