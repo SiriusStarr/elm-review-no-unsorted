@@ -37,6 +37,7 @@ import Maybe.Extra as MaybeX
 import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameFor)
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
+import Set exposing (Set)
 import Util exposing (checkSorting, makeAccessFunc, validate)
 
 
@@ -1327,6 +1328,19 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
 dereferenceType : ModuleContext -> Type -> DereferencedType
 dereferenceType context type_ =
     let
+        dropFields : Set String -> Type -> Type
+        dropFields toDrop t =
+            case t of
+                RecordType r ->
+                    RecordType
+                        { r
+                            | fields = List.filter (\( f, _ ) -> not <| Set.member f toDrop) r.fields
+                            , generic = Maybe.map (dropFields toDrop) r.generic
+                        }
+
+                notARecord ->
+                    notARecord
+
         go : Type -> Type
         go t =
             case t of
@@ -1353,10 +1367,18 @@ dereferenceType context type_ =
                         |> Maybe.withDefault (NamedType ( moduleName, name ) ts_)
 
                 RecordType r ->
+                    let
+                        fields : List ( String, Type )
+                        fields =
+                            List.map (Tuple.mapSecond go) r.fields
+                    in
                     RecordType
                         { r
-                            | fields = List.map (Tuple.mapSecond go) r.fields
-                            , generic = Maybe.map go r.generic
+                            | fields = fields
+                            , generic =
+                                Maybe.map go r.generic
+                                    -- Generic records overwrite more "inner" fields with their outer ones
+                                    |> Maybe.map (dropFields (Set.fromList <| List.map Tuple.first fields))
                         }
 
                 _ ->
@@ -2498,18 +2520,32 @@ searchOrders context hasAllFields fields =
                 fields
                 |> Tuple.second
 
+        missingFieldLimit : KnownRecord -> Int
+        missingFieldLimit =
+            if hasAllFields then
+                always 1
+
+            else
+                Dict.size << .order
+
         step : ModuleName -> String -> KnownRecord -> OrderMatches -> OrderMatches
         step moduleName name o acc =
             if not (checkTypes o) then
                 -- Typecheck failed
                 acc
 
-            else if hasAllFields && not (Dict.isEmpty <| Dict.diff o.order matchFields) then
-                -- All fields must be present and some are missing
+            else if Dict.size (Dict.diff o.order matchFields) >= missingFieldLimit o then
+                -- Too many fields are missing
                 acc
 
             else if o.isGeneric then
-                { acc | genericMatches = { type_ = ( ( moduleName, name ), o ), missing = Dict.values <| Dict.diff matchFields o.order } :: acc.genericMatches }
+                { acc
+                    | genericMatches =
+                        { type_ = ( ( moduleName, name ), o )
+                        , missing = Dict.values <| Dict.diff matchFields o.order
+                        }
+                            :: acc.genericMatches
+                }
 
             else if Dict.isEmpty <| Dict.diff matchFields o.order then
                 -- Record is not generic and has no extra fields, so it is a good match

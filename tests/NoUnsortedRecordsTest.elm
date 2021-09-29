@@ -1990,6 +1990,62 @@ a = { bar = 2, foo = 1, baz = 3 }
                         )
                     |> Review.Test.expectErrors
                         [ ambiguousRecordError [ "A.A", "A.Generic (A.B)" ] "{ bar = 2, foo = 1, baz = 3 }" ]
+        , test "does not recurse infinitely when not all fields must be present" <|
+            \() ->
+                """module A exposing (..)
+
+type alias Generic a =
+    { a | unrelated : Int, foo : Int }
+
+func x =
+    case x of
+        { bar, baz, foo } ->
+            True
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "handles weird Elm nested generic behavior" <|
+            \() ->
+                """module A exposing (..)
+
+type alias Gen1 a =
+    { a | y : Int, x : Int }
+
+
+type alias Gen2 b =
+    { b | x : Char, y : String }
+
+type alias OtherRec = { y : String, x : Char }
+
+a : Gen2 (Gen1 { x : String, y : Float })
+a =
+    { y = "bar", x = 'a' }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 14, column = 5 }, end = { row = 14, column = 6 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias Gen1 a =
+    { a | y : Int, x : Int }
+
+
+type alias Gen2 b =
+    { b | x : Char, y : String }
+
+type alias OtherRec = { y : String, x : Char }
+
+a : Gen2 (Gen1 { x : String, y : Float })
+a =
+    { x = 'a', y = "bar"}
+"""
+                        ]
         ]
 
 
