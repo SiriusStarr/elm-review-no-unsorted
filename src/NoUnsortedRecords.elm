@@ -2613,13 +2613,15 @@ typesMatch inVars (DereferencedType derefType1) (DereferencedType derefType2) =
             List.unzip both
                 |> (\( l1s, l2s ) -> checkListOfTypes typeVars l1s l2s)
                 |> (\( vars, matchAcc ) ->
-                        Maybe.map (go vars (RecordType { canonical = False, generic = Nothing, fields = only1 })) generic2
-                            |> Maybe.withDefault ( vars, matchAcc )
+                        validate (not << List.isEmpty) only1
+                            |> Maybe.map2 (\g fs -> go vars (RecordType { canonical = False, generic = Nothing, fields = fs }) g) generic2
+                            |> Maybe.withDefault ( vars, List.isEmpty only1 )
                             |> Tuple.mapSecond ((&&) matchAcc)
                    )
                 |> (\( vars, matchAcc ) ->
-                        Maybe.map (\g1 -> go vars g1 (RecordType { canonical = False, generic = Nothing, fields = only2 })) generic1
-                            |> Maybe.withDefault ( vars, matchAcc )
+                        validate (not << List.isEmpty) only2
+                            |> Maybe.map2 (\g fs -> go vars (RecordType { canonical = False, generic = Nothing, fields = fs }) g) generic1
+                            |> Maybe.withDefault ( vars, List.isEmpty only2 )
                             |> Tuple.mapSecond ((&&) matchAcc)
                    )
 
