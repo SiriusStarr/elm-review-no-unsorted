@@ -496,6 +496,13 @@ type DereferencedType
     = DereferencedType Type
 
 
+{-| A type with positional type variables, e.g. `Ok a` having been created from
+`Result a b`.
+-}
+type TypeWithPositionalVars
+    = TypeWithPositionalVars Type
+
+
 {-| The project context.
 
 `aliases` stores all type aliases.
@@ -509,9 +516,9 @@ vars.
 
 -}
 type alias ProjectContext =
-    { aliases : Dict ModuleName (Dict String (List Type -> Type))
+    { aliases : Dict ModuleName (Dict String TypeWithPositionalVars)
     , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
-    , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : List Type -> Type })
+    , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
     , functionTypes : Dict ModuleName (Dict String Type)
     }
 
@@ -530,9 +537,9 @@ with any (anonymous) records associated with custom types (by index).
 
 -}
 type alias ModuleContext =
-    { aliases : Dict ModuleName (Dict String (List Type -> Type))
+    { aliases : Dict ModuleName (Dict String TypeWithPositionalVars)
     , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
-    , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : List Type -> Type })
+    , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
     , functionTypes : Dict ModuleName (Dict String Type)
     , currentModule : ModuleName
     , exposingList : Maybe Exposing
@@ -703,7 +710,7 @@ dependencyVisitor =
         step : Elm.Docs.Module -> ProjectContext -> ProjectContext
         step ({ aliases, binops, unions, values } as mod) acc =
             let
-                recordFromTypeAlias : Elm.Docs.Alias -> ( List ( String, KnownRecord ), List ( String, { customTypeName : Maybe String, type_ : List Type -> Type } ) )
+                recordFromTypeAlias : Elm.Docs.Alias -> ( List ( String, KnownRecord ), List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } ) )
                 recordFromTypeAlias { name, args, tipe } =
                     case tipe of
                         Elm.Type.Record fields Nothing ->
@@ -717,7 +724,6 @@ dependencyVisitor =
                                                 { constrainedTypeVarsAreRespected = False
                                                 , recordIsCanonical = True
                                                 }
-                                                Dict.empty
                                                 t
                                             )
                                     )
@@ -729,29 +735,24 @@ dependencyVisitor =
                             , [ ( name
                                 , { customTypeName = Nothing
                                   , type_ =
-                                        \ts ->
-                                            List.map2 Tuple.pair args ts
-                                                |> Dict.fromList
-                                                |> (\vars ->
-                                                        List.map
-                                                            (docTypeToType moduleName
-                                                                -- Constrained type vars do apply to record constructors
-                                                                { constrainedTypeVarsAreRespected = True
-                                                                , recordIsCanonical = True
-                                                                }
-                                                                vars
-                                                                << Tuple.second
-                                                            )
-                                                            fields
-                                                            |> makeFunctionType
-                                                                (docTypeToType moduleName
-                                                                    { constrainedTypeVarsAreRespected = True
-                                                                    , recordIsCanonical = True
-                                                                    }
-                                                                    vars
-                                                                    tipe
-                                                                )
-                                                   )
+                                        List.map
+                                            (Tuple.second
+                                                >> docTypeToTypeWithPositionalVars moduleName
+                                                    -- Constrained type vars do apply to record constructors
+                                                    { constrainedTypeVarsAreRespected = True
+                                                    , recordIsCanonical = True
+                                                    }
+                                                    args
+                                            )
+                                            fields
+                                            |> makeFunctionTypeWithPositionalVars
+                                                (docTypeToTypeWithPositionalVars moduleName
+                                                    { constrainedTypeVarsAreRespected = True
+                                                    , recordIsCanonical = True
+                                                    }
+                                                    args
+                                                    tipe
+                                                )
                                   }
                                 )
                               ]
@@ -768,7 +769,6 @@ dependencyVisitor =
                                                 { constrainedTypeVarsAreRespected = False
                                                 , recordIsCanonical = True
                                                 }
-                                                Dict.empty
                                                 t
                                             )
                                     )
@@ -784,46 +784,44 @@ dependencyVisitor =
                         _ ->
                             ( [], [] )
 
-                makeAlias : Elm.Docs.Alias -> ( String, List Type -> Type )
+                makeAlias : Elm.Docs.Alias -> ( String, TypeWithPositionalVars )
                 makeAlias { name, args, tipe } =
                     ( name
-                    , \ts ->
-                        List.map2 Tuple.pair args ts
-                            |> Dict.fromList
-                            |> (\vars ->
-                                    docTypeToType moduleName
-                                        -- Constrained type vars aren't respected for type aliases
-                                        { constrainedTypeVarsAreRespected = False
-                                        , recordIsCanonical = True
-                                        }
-                                        vars
-                                        tipe
-                               )
+                    , docTypeToTypeWithPositionalVars moduleName
+                        -- Constrained type vars aren't respected for type aliases
+                        { constrainedTypeVarsAreRespected = False
+                        , recordIsCanonical = True
+                        }
+                        args
+                        tipe
                     )
 
-                makeConstructor : (List Type -> Type) -> List String -> ( String, List Elm.Type.Type ) -> ( String, List Type -> Type )
+                makeConstructor : TypeWithPositionalVars -> List String -> ( String, List Elm.Type.Type ) -> ( String, TypeWithPositionalVars )
                 makeConstructor return typeVars ( name, arguments ) =
                     ( name
-                    , \ts ->
-                        List.map2 Tuple.pair typeVars ts
-                            |> Dict.fromList
-                            |> (\vars ->
-                                    List.map
-                                        (docTypeToType moduleName
-                                            { constrainedTypeVarsAreRespected = True
-                                            , recordIsCanonical = True
-                                            }
-                                            vars
-                                        )
-                                        arguments
-                                        |> makeFunctionType (return ts)
-                               )
+                    , List.map
+                        (docTypeToTypeWithPositionalVars moduleName
+                            { constrainedTypeVarsAreRespected = True
+                            , recordIsCanonical = True
+                            }
+                            typeVars
+                        )
+                        arguments
+                        |> makeFunctionTypeWithPositionalVars return
                     )
 
-                functionsFromCustomType : Elm.Docs.Union -> List ( String, { customTypeName : Maybe String, type_ : List Type -> Type } )
+                functionsFromCustomType : Elm.Docs.Union -> List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
                 functionsFromCustomType { name, args, tags } =
                     List.map
-                        (makeConstructor (NamedType ( moduleName, name )) args
+                        (makeConstructor
+                            (List.map (TypeVar Nothing) args
+                                |> NamedType ( moduleName, name )
+                                |> DereferencedType
+                                |> assignTypeVars (makePositionalArgTypeVars args)
+                                |> getType
+                                |> TypeWithPositionalVars
+                            )
+                            args
                             >> Tuple.mapSecond (\type_ -> { customTypeName = Just name, type_ = type_ })
                         )
                         tags
@@ -834,7 +832,6 @@ dependencyVisitor =
                         { constrainedTypeVarsAreRespected = True
                         , recordIsCanonical = False
                         }
-                        Dict.empty
                         tipe
                         |> Tuple.pair name
 
@@ -844,7 +841,6 @@ dependencyVisitor =
                         { constrainedTypeVarsAreRespected = True
                         , recordIsCanonical = False
                         }
-                        Dict.empty
                         tipe
                         |> Tuple.pair name
 
@@ -852,7 +848,7 @@ dependencyVisitor =
                 moduleName =
                     String.split "." mod.name
 
-                newAliases : Maybe ( ModuleName, Dict String (List Type -> Type) )
+                newAliases : Maybe ( ModuleName, Dict String TypeWithPositionalVars )
                 newAliases =
                     List.map makeAlias aliases
                         |> validate (not << List.isEmpty)
@@ -865,7 +861,7 @@ dependencyVisitor =
                         |> Tuple.mapBoth (Dict.fromList << List.concat) (Dict.fromList << List.concat)
                         |> Tuple.mapFirst (Maybe.map (Tuple.pair moduleName) << validate (not << Dict.isEmpty))
 
-                newConstructors : Maybe ( ModuleName, Dict String { customTypeName : Maybe String, type_ : List Type -> Type } )
+                newConstructors : Maybe ( ModuleName, Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
                 newConstructors =
                     List.concatMap functionsFromCustomType unions
                         |> Dict.fromList
@@ -908,15 +904,28 @@ dependencyVisitor =
         )
 
 
+{-| Given the current module name, whether or not record orders are canonical,
+and a dict of positional type vars, convert an `Elm.Type.Type` to a
+`TypeWithPositionalVars`.
+-}
+docTypeToTypeWithPositionalVars : ModuleName -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> List String -> Elm.Type.Type -> TypeWithPositionalVars
+docTypeToTypeWithPositionalVars currentModule settings typeArgs =
+    docTypeToType currentModule settings
+        >> DereferencedType
+        >> assignTypeVars (makePositionalArgTypeVars typeArgs)
+        >> getType
+        >> TypeWithPositionalVars
+
+
 {-| Given the current module name and whether or not record orders are
 canonical, convert an `Elm.Type.Type` to a `Type`.
 -}
-docTypeToType : ModuleName -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Dict String Type -> Elm.Type.Type -> Type
-docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) typeVars type_ =
+docTypeToType : ModuleName -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Elm.Type.Type -> Type
+docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) type_ =
     let
         go : Elm.Type.Type -> Type
         go =
-            docTypeToType currentModule settings typeVars
+            docTypeToType currentModule settings
 
         makeList : ModuleName -> String -> List Elm.Type.Type -> Maybe Type
         makeList mod name args =
@@ -955,22 +964,16 @@ docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonica
         Elm.Type.Record fields generic ->
             RecordType
                 { generic =
-                    case Maybe.andThen (\g -> Dict.get g typeVars) generic of
-                        Just t ->
-                            Just t
-
-                        Nothing ->
-                            -- Generic records completely ignore typeclasses, i.e.
-                            -- `type alias G comparable = { comparable | x : Int }`
-                            -- is just a normal generic record.
-                            Maybe.map (TypeVar Nothing) generic
+                    -- Generic records completely ignore typeclasses, i.e.
+                    -- `type alias G comparable = { comparable | x : Int }`
+                    -- is just a normal generic record.
+                    Maybe.map (TypeVar Nothing) generic
                 , canonical = recordIsCanonical
                 , fields = List.map (Tuple.mapSecond go) fields
                 }
 
         Elm.Type.Var s ->
-            Dict.get s typeVars
-                |> Maybe.withDefault (makeTypeVar constrainedTypeVarsAreRespected s)
+            makeTypeVar constrainedTypeVarsAreRespected s
 
 
 {-| Make a `TypeVar` from a string.
@@ -1042,7 +1045,6 @@ declarationListVisitor context declarations =
                                         { constrainedTypeVarsAreRespected = False
                                         , recordIsCanonical = True
                                         }
-                                        Dict.empty
                                         t
                                     )
                             )
@@ -1052,49 +1054,50 @@ declarationListVisitor context declarations =
                     )
                 |> Maybe.map (Tuple.pair <| Node.value name)
 
-        makeAliasInfo : TypeAlias -> ( String, List Type -> Type )
+        makeAliasInfo : TypeAlias -> ( String, TypeWithPositionalVars )
         makeAliasInfo { name, generics, typeAnnotation } =
             ( Node.value name
-            , \ts ->
-                List.map2 (\g t -> ( Node.value g, t )) generics ts
-                    |> Dict.fromList
-                    |> (\vars ->
-                            typeAnnotToType context
-                                -- Constrained type vars are not respected for aliases
-                                { constrainedTypeVarsAreRespected = False
-                                , recordIsCanonical = True
-                                }
-                                vars
-                                typeAnnotation
-                       )
+            , typeAnnotToTypeWithPositionalVars context
+                -- Constrained type vars are not respected for aliases
+                { constrainedTypeVarsAreRespected = False
+                , recordIsCanonical = True
+                }
+                (List.map Node.value generics)
+                typeAnnotation
             )
 
-        makeConstructor : (List Type -> Type) -> List (Node String) -> ValueConstructor -> ( String, List Type -> Type )
+        makeConstructor : TypeWithPositionalVars -> List (Node String) -> ValueConstructor -> ( String, TypeWithPositionalVars )
         makeConstructor return typeVars { name, arguments } =
             ( Node.value name
-            , \ts ->
-                List.map2 (\s t -> ( Node.value s, t )) typeVars ts
-                    |> Dict.fromList
-                    |> (\vars ->
-                            List.map
-                                (typeAnnotToType context
-                                    { constrainedTypeVarsAreRespected = True
-                                    , recordIsCanonical = True
-                                    }
-                                    vars
-                                )
-                                arguments
-                                |> makeFunctionType (return ts)
-                       )
+            , List.map
+                (typeAnnotToTypeWithPositionalVars context
+                    { constrainedTypeVarsAreRespected = True
+                    , recordIsCanonical = True
+                    }
+                    (List.map Node.value typeVars)
+                )
+                arguments
+                |> makeFunctionTypeWithPositionalVars return
             )
 
-        getConstructorsFromDeclaration : Node Declaration -> List ( String, { customTypeName : Maybe String, type_ : List Type -> Type } )
+        getConstructorsFromDeclaration : Node Declaration -> List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
         getConstructorsFromDeclaration node =
             case Node.value node of
                 CustomTypeDeclaration { name, generics, constructors } ->
                     List.map
                         (Node.value
-                            >> makeConstructor (NamedType ( [], Node.value name )) generics
+                            >> makeConstructor
+                                (List.map Node.value generics
+                                    |> (\gs ->
+                                            List.map (TypeVar Nothing) gs
+                                                |> NamedType ( [], Node.value name )
+                                                |> DereferencedType
+                                                |> assignTypeVars (makePositionalArgTypeVars gs)
+                                                |> getType
+                                                |> TypeWithPositionalVars
+                                       )
+                                )
+                                generics
                             >> Tuple.mapSecond
                                 (\type_ ->
                                     { customTypeName = Just <| Node.value name
@@ -1113,29 +1116,27 @@ declarationListVisitor context declarations =
                                 [ ( Node.value name
                                   , { customTypeName = Nothing
                                     , type_ =
-                                        \ts ->
-                                            List.map2 (\s t -> ( Node.value s, t )) generics ts
-                                                |> Dict.fromList
-                                                |> (\vars ->
-                                                        List.map
-                                                            (typeAnnotToType context
+                                        List.map Node.value generics
+                                            |> (\vars ->
+                                                    List.map
+                                                        (Node.value
+                                                            >> Tuple.second
+                                                            >> typeAnnotToTypeWithPositionalVars context
                                                                 { constrainedTypeVarsAreRespected = True
                                                                 , recordIsCanonical = True
                                                                 }
                                                                 vars
-                                                                << Tuple.second
-                                                                << Node.value
+                                                        )
+                                                        fields
+                                                        |> makeFunctionTypeWithPositionalVars
+                                                            (typeAnnotToTypeWithPositionalVars context
+                                                                { constrainedTypeVarsAreRespected = True
+                                                                , recordIsCanonical = True
+                                                                }
+                                                                vars
+                                                                typeAnnotation
                                                             )
-                                                            fields
-                                                            |> makeFunctionType
-                                                                (typeAnnotToType context
-                                                                    { constrainedTypeVarsAreRespected = True
-                                                                    , recordIsCanonical = True
-                                                                    }
-                                                                    vars
-                                                                    typeAnnotation
-                                                                )
-                                                   )
+                                               )
                                     }
                                   )
                                 ]
@@ -1157,7 +1158,6 @@ declarationListVisitor context declarations =
                                     { constrainedTypeVarsAreRespected = True
                                     , recordIsCanonical = False
                                     }
-                                    Dict.empty
                                     typeAnnotation
                                     |> Tuple.pair (Node.value name)
                             )
@@ -1233,7 +1233,6 @@ getFunctionBinding context { signature } =
                     { constrainedTypeVarsAreRespected = True
                     , recordIsCanonical = False
                     }
-                    Dict.empty
                     typeAnnotation
                     |> dereferenceType context
                 )
@@ -1253,15 +1252,37 @@ makeFunctionType return ts =
             FunctionType { from = t, to = makeFunctionType return ts_ }
 
 
-{-| Given context, whether or not record types found are in canonical order, and
-a `Dict` of type variables, convert a `TypeAnnotation` into a `Type`.
+{-| Given a return type and a successive list of argument types, create a
+function with that type, all types having positional vars.
 -}
-typeAnnotToType : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Dict String Type -> Node TypeAnnotation -> Type
-typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) typeVars annot =
+makeFunctionTypeWithPositionalVars : TypeWithPositionalVars -> List TypeWithPositionalVars -> TypeWithPositionalVars
+makeFunctionTypeWithPositionalVars return ts =
+    makeFunctionType (getTypeWithPositionalVars return) (List.map getTypeWithPositionalVars ts)
+        |> TypeWithPositionalVars
+
+
+{-| Given context, whether or not record types found are in canonical order, and
+a `Dict` of positional type variables, convert a `TypeAnnotation` into a
+`TypeWithPositionalVars`.
+-}
+typeAnnotToTypeWithPositionalVars : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> List String -> Node TypeAnnotation -> TypeWithPositionalVars
+typeAnnotToTypeWithPositionalVars context settings typeArgs =
+    typeAnnotToType context settings
+        >> DereferencedType
+        >> assignTypeVars (makePositionalArgTypeVars typeArgs)
+        >> getType
+        >> TypeWithPositionalVars
+
+
+{-| Given context and whether or not record types found are in canonical order,
+convert a `TypeAnnotation` into a `Type`.
+-}
+typeAnnotToType : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Node TypeAnnotation -> Type
+typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) annot =
     let
         go : Node TypeAnnotation -> Type
         go =
-            typeAnnotToType context settings typeVars
+            typeAnnotToType context settings
 
         makeList : ModuleName -> String -> List (Node TypeAnnotation) -> Maybe Type
         makeList moduleName name args =
@@ -1306,11 +1327,10 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
         GenericRecord generic fs ->
             RecordType
                 { generic =
-                    Dict.get (Node.value generic) typeVars
-                        -- Generic records completely ignore typeclasses, i.e.
-                        -- `type alias G comparable = { comparable | x : Int }`
-                        -- is just a normal generic record.
-                        |> MaybeX.orElse (Just <| TypeVar Nothing <| Node.value generic)
+                    -- Generic records completely ignore typeclasses, i.e.
+                    -- `type alias G comparable = { comparable | x : Int }`
+                    -- is just a normal generic record.
+                    Just <| TypeVar Nothing <| Node.value generic
                 , canonical = recordIsCanonical
                 , fields = List.map (Tuple.mapBoth Node.value go << Node.value) <| Node.value fs
                 }
@@ -1319,8 +1339,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
             FunctionType { from = go from, to = go to }
 
         GenericType s ->
-            Dict.get s typeVars
-                |> Maybe.withDefault (makeTypeVar constrainedTypeVarsAreRespected s)
+            makeTypeVar constrainedTypeVarsAreRespected s
 
 
 {-| Canonicalize a type, dereferencing all aliases.
@@ -1361,8 +1380,8 @@ dereferenceType context type_ =
                     in
                     Dict.get moduleName context.aliases
                         |> Maybe.andThen (Dict.get name)
-                        -- Apply type vars and check for further canonicalization
-                        |> Maybe.map (\f -> go <| f ts_)
+                        -- Apply type vars
+                        |> Maybe.map (go << assignPositionalTypeVars ts_)
                         -- If no aliases match, it must be a custom type
                         |> Maybe.withDefault (NamedType ( moduleName, name ) ts_)
 
@@ -1387,6 +1406,25 @@ dereferenceType context type_ =
                     t
     in
     DereferencedType <| go type_
+
+
+{-| Assign a list of positional type vars.
+-}
+assignPositionalTypeVars : List Type -> TypeWithPositionalVars -> Type
+assignPositionalTypeVars ts t =
+    List.indexedMap (\i -> Tuple.pair ("positional arg " ++ String.fromInt i)) ts
+        |> Dict.fromList
+        |> (\vars -> assignTypeVars vars (DereferencedType <| getTypeWithPositionalVars t))
+        |> getType
+
+
+{-| Given a list of type vars (as string), create positional type vars from
+them.
+-}
+makePositionalArgTypeVars : List String -> Dict String Type
+makePositionalArgTypeVars =
+    List.indexedMap (\i s -> ( s, TypeVar Nothing <| "positional arg " ++ String.fromInt i ))
+        >> Dict.fromList
 
 
 {-| Assign type vars to a type.
@@ -1431,6 +1469,13 @@ assignTypeVars typeVars type_ =
 -}
 getType : DereferencedType -> Type
 getType (DereferencedType t) =
+    t
+
+
+{-| Unwrap a `TypeWithPositionalVars`.
+-}
+getTypeWithPositionalVars : TypeWithPositionalVars -> Type
+getTypeWithPositionalVars (TypeWithPositionalVars t) =
     t
 
 
@@ -1926,7 +1971,7 @@ findFunctionType { context, localFunctions } type_ moduleNode name =
                     Dict.get moduleName context.constructors
                         |> Maybe.andThen (Dict.get name)
                         |> Maybe.map .type_
-                        |> Maybe.map ((|>) (getTypeVars type_))
+                        |> Maybe.map (assignPositionalTypeVars (getTypeVars type_))
 
                 else
                     Dict.get moduleName context.functionTypes
@@ -2091,7 +2136,6 @@ recordDefToCheckable context fullRange hasAllFields fields =
                 { constrainedTypeVarsAreRespected = True
                 , recordIsCanonical = False
                 }
-                Dict.empty
                 >> dereferenceType context
                 >> Just
     in
