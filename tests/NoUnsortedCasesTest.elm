@@ -1091,6 +1091,61 @@ toString custom string =
         expression?\"\"\"
 """
                         ]
+        , test "do not mangle syntax in complex cases" <|
+            \() ->
+                """module A exposing (..)
+type A = B | C | D
+foo bar =
+    let
+        thing =
+            case bar of
+                B ->
+                    \\a b ->
+                        case ( Nothing, Nothing ) of
+                            ( Just a_, Just b_ ) ->
+                                GT
+                            ( Just _, Nothing ) ->
+                                LT
+                            ( Nothing, Just _ ) ->
+                                GT
+                            ( Nothing, Nothing ) ->
+                                LT
+                D ->
+                    \\a b -> GT
+                C ->
+                    \\a b -> GT
+    in
+    thing
+        """
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 13 }, end = { row = 6, column = 17 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+type A = B | C | D
+foo bar =
+    let
+        thing =
+            case bar of
+                B ->
+                    \\a b ->
+                        case ( Nothing, Nothing ) of
+                            ( Just a_, Just b_ ) ->
+                                GT
+                            ( Just _, Nothing ) ->
+                                LT
+                            ( Nothing, Just _ ) ->
+                                GT
+                            ( Nothing, Nothing ) ->
+                                LT
+                C ->
+                    \\a b -> GT
+                D ->
+                    \\a b -> GT
+    in
+    thing
+        """
+                        ]
         ]
 
 
