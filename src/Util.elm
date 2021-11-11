@@ -243,10 +243,9 @@ createFix extractSource sorted =
                     |> Maybe.map Tuple.second
                     |> Maybe.map
                         (\oldRange ->
-                            [ extractSource range
-                                |> String.trimRight
+                            extractSource range
                                 |> Fix.replaceRangeBy oldRange
-                            ]
+                                |> List.singleton
                         )
                     |> Maybe.withDefault []
     in

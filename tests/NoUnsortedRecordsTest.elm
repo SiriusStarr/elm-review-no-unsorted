@@ -25,6 +25,7 @@ all =
         , inTypeAnnotations
         , inExpressions
         , inPatterns
+        , avoidBadFixes
         , disambiguatesByHasAllFields
         , disambiguatesByTypeAnnotation
         , customTypeArgs
@@ -62,7 +63,7 @@ a = { c = 3, b = 2, a = 1 }
                         [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
-a = { a = 1, b = 2, c = 3}
+a = { a = 1 , b = 2, c = 3}
 """
                         ]
         , test "passes unknown record that is not alphabetical with option" <|
@@ -310,7 +311,7 @@ a = { b = 1, c = 2, a = 3 }
                         [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
-a = { a = 3, b = 1, c = 2}
+a = { a = 3 , b = 1, c = 2}
 """
                         ]
         , test "sorts multiline expressions" <|
@@ -330,7 +331,9 @@ a =
 
 a =
     { a = 3
-    , b = 1, c = 2}
+    
+    , b = 1, c = 2
+    }
 """
                         ]
         ]
@@ -351,7 +354,7 @@ a _ = True
                         [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
-a : {  a : Int,b : Int, c : Int} -> Bool
+a : {  a : Int ,b : Int, c : Int} -> Bool
 a _ = True
 """
                         ]
@@ -375,7 +378,9 @@ a _ =
 
 a :
     {  a : Int
-    ,b : Int, c : Int}
+    
+    ,b : Int, c : Int
+    }
     -> Bool
 a _ =
     True
@@ -399,6 +404,53 @@ a { foo, baz, bar } = True
                             |> Review.Test.whenFixed """module A exposing (..)
 
 a { bar, baz, foo } = True
+"""
+                        ]
+        ]
+
+
+avoidBadFixes : Test
+avoidBadFixes =
+    describe "avoids bad fixes"
+        [ test "do not splice onto the ends of comments" <|
+            \() ->
+                """module A exposing (..)
+
+type alias Rec =
+    { foo : Int
+    , bar : Int
+    , baz : Int
+    }
+
+test : Rec -> Rec
+test r =
+    { r
+        | bar = 1
+        -- comment
+        , foo = 2
+        , baz = 3
+    }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 11, column = 5 }, end = { row = 11, column = 6 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type alias Rec =
+    { foo : Int
+    , bar : Int
+    , baz : Int
+    }
+
+test : Rec -> Rec
+test r =
+    { r
+        | foo = 2
+        , bar = 1
+        -- comment
+        , baz = 3
+    }
 """
                         ]
         ]
@@ -462,7 +514,7 @@ type alias A = { foo : Int, baz : Int, bar : Int }
 
 type alias B = { baz : Int, bar : Int, foo : Int, extra : Int }
 
-a = { bar = 2, baz = 3}
+a = { bar = 2 , baz = 3}
 """
                         ]
         , test "is ambiguous with record updates" <|
@@ -525,7 +577,7 @@ type alias A = { foo : Int, baz : Int, bar : Int }
 
 type alias B = { baz : Int, bar : Int, foo : Int, extra : Int }
 
-a : {  bar : Int,baz : Int} -> Bool
+a : {  bar : Int ,baz : Int} -> Bool
 a _ = True
 """
                         ]
@@ -550,7 +602,7 @@ type alias A = { foo : Int, baz : Int, bar : Int }
 
 type alias B = { baz : Int, bar : Int, foo : Int, extra : Int }
 
-a : {  foo : Int, baz : Int,bar : Int} -> Bool
+a : {  foo : Int, baz : Int ,bar : Int} -> Bool
 a _ = True
 """
                         ]
@@ -1535,7 +1587,7 @@ a = { problem = BadRepeat, col = 1, row = 2 }
 import Parser exposing (DeadEnd, Problem (..))
 
 a : DeadEnd
-a = { row = 2, col = 1, problem = BadRepeat}
+a = { row = 2 , col = 1, problem = BadRepeat}
 """
                         ]
         , test "will sort based on type alias in dependency without" <|
@@ -1554,7 +1606,7 @@ a = { problem = BadRepeat, col = 1, row = 2 }
 
 import Parser exposing (DeadEnd, Problem (..))
 
-a = { row = 2, col = 1, problem = BadRepeat}
+a = { row = 2 , col = 1, problem = BadRepeat}
 """
                         ]
         , test "will disambiguate based on dependency function signature (including list type)" <|
@@ -1578,7 +1630,7 @@ import Parser exposing (deadEndsToString, DeadEnd, Problem (..))
 
 type alias MyDeadEnd = { col : Int, row : Int, problem : Problem }
 
-a = deadEndsToString [ { row = 2, col = 1, problem = BadRepeat} ]
+a = deadEndsToString [ { row = 2 , col = 1, problem = BadRepeat} ]
 """
                         ]
         , test "will disambiguate based on field type" <|
@@ -1604,7 +1656,7 @@ import Parser exposing (deadEndsToString, DeadEnd, Problem (..))
 type alias MyDeadEnd = { col : Int, row : Int, problem : String }
 
 a : { col : Int, row : Int, problem : Problem }
-a = { row = 2, col = 1, problem = BadRepeat}
+a = { row = 2 , col = 1, problem = BadRepeat}
 """
                         , unsortedError
                             |> Review.Test.atExactly { start = { row = 7, column = 5 }, end = { row = 7, column = 6 } }
@@ -1712,7 +1764,7 @@ a = { x = 0, bar = 2, z = 3, y = 2, foo = 1, baz = 3 }
 type alias Generic rec = { rec | foo : Int, bar : Int, baz : Int }
 
 a : Generic { x : Int, y : Int, z : Int }
-a = { foo = 1, bar = 2, baz = 3, x = 0, y = 2, z = 3}
+a = { foo = 1, bar = 2, baz = 3 , x = 0, y = 2, z = 3}
 """
                         ]
         , test "with additional fields without type signature" <|
@@ -1784,7 +1836,7 @@ type alias Generic rec = { rec | foo : Int, bar : Int, baz : Int }
 type alias A = { yi : Int, er : Int, san : Int }
 
 a : Generic A
-a = { foo = 1, bar = 2, baz = 3, yi = 3, er = 2, san = 0}
+a = { foo = 1, bar = 2, baz = 3 , yi = 3, er = 2, san = 0}
 """
                         ]
         , test "with additional fields that have canonical order without annotation" <|
@@ -1886,7 +1938,7 @@ type alias Generic2 rec = { rec | yi : Int, er : Int, san : Int }
 type alias A = { y : Int, x : Int }
 
 a : Generic (Generic2 A)
-a = { foo = 1, bar = 2, baz = 3, yi = 3, er = 2, san = 0, y = 2, x = 6}
+a = { foo = 1, bar = 2, baz = 3 , yi = 3, er = 2, san = 0, y = 2, x = 6}
 """
                         ]
         , test "nested generics without canonical order" <|
@@ -2043,7 +2095,7 @@ type alias OtherRec = { y : String, x : Char }
 
 a : Gen2 (Gen1 { x : String, y : Float })
 a =
-    { x = 'a', y = "bar"}
+    { x = 'a' , y = "bar"}
 """
                         ]
         ]
@@ -2344,7 +2396,7 @@ r : A
 r = { foo = 1, bar = 2, baz = 3 }
 
 func =
-    { r | foo = 2, baz = 1}
+    { r | foo = 2 , baz = 1}
 """
                         ]
         , test "unifies record types" <|
