@@ -6,10 +6,10 @@ rules to ensure that anything (readily) sortable in Elm code is sorted in the
 
 ## Provided rules
 
-* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.4/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
-* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.4/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
-* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.4/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
-* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.4/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
+* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
+* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
+* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
+* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
 
 ## Configuration
 
@@ -52,6 +52,11 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example
 
 ## Changlelog
 
+* `1.0.5` -- 🚑 Fix critical bug causing `NoUnsortedRecords` to rarely generate
+  valid code that was missing fields for record updates.  It is recommended that
+  you **check any record update expressions** that **contained comments** that
+  were fixed by this rule prior to this version, as one or more fields may have
+  been appended to the end of a comment in sorting.
 * `1.0.4` -- Update to `elm-syntax` v7.2.8 to fix upstream issue with lambda
   ranges generating invalid code in fixes.
 * `1.0.3` -- Fix crash with `--fix` or `--watch` due to comparison of function
