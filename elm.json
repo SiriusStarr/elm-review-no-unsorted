@@ -16,11 +16,11 @@
         "elm/project-metadata-utils": "1.0.2 <= v < 2.0.0",
         "elm-community/dict-extra": "2.4.0 <= v < 3.0.0",
         "elm-community/graph": "6.0.0 <= v < 7.0.0",
-        "elm-community/list-extra": "8.3.1 <= v < 9.0.0",
-        "elm-community/maybe-extra": "5.2.0 <= v < 6.0.0",
+        "elm-community/list-extra": "8.5.1 <= v < 9.0.0",
+        "elm-community/maybe-extra": "5.2.1 <= v < 6.0.0",
         "elm-community/result-extra": "2.4.0 <= v < 3.0.0",
         "elm-community/string-extra": "4.0.1 <= v < 5.0.0",
-        "jfmengels/elm-review": "2.4.0 <= v < 3.0.0",
+        "jfmengels/elm-review": "2.6.1 <= v < 3.0.0",
         "stil4m/elm-syntax": "7.2.8 <= v < 8.0.0"
     },
     "test-dependencies": {
