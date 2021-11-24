@@ -2621,7 +2621,9 @@ typesMatch inVars (DereferencedType derefType1) (DereferencedType derefType2) =
             case ( Dict.get ( side, name ) typeVars, type_ ) of
                 ( Just t, _ ) ->
                     -- If the type var has been assigned, check if that type matches
-                    go typeVars t type_
+                    -- Remove the matched typevar, because if the same exists within it refers to a different value
+                    go (Dict.remove ( side, name ) typeVars) t type_
+                        |> Tuple.mapFirst (Dict.insert ( side, name ) t)
 
                 ( Nothing, TypeVar _ _ ) ->
                     -- Handle base case.  This isn't right, but not worth going to the effort of matching typeclasses and the like
