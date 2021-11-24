@@ -6,10 +6,10 @@ rules to ensure that anything (readily) sortable in Elm code is sorted in the
 
 ## Provided rules
 
-* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
-* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
-* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
-* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.5/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
+* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.6/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
+* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.6/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
+* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.6/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
+* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.0.6/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
 
 ## Configuration
 
@@ -52,6 +52,10 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example
 
 ## Changlelog
 
+* `1.0.6` -- 🐛 Fix a bug causing `NoUnsortedRecords` to recurse infinitely in
+  certain rare cases where a type variable was assigned to a value containing an
+  identically-named type variable (e.g. the type variable `a` ended up being
+  assigned to a value defined by the generic record `{ a | field : Int }`).
 * `1.0.5` -- 🚑 Fix critical bug causing `NoUnsortedRecords` to rarely generate
   valid code that was missing fields for record updates.  It is recommended that
   you **check any record update expressions** that **contained comments** that

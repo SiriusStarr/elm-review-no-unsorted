@@ -10,13 +10,13 @@
             "elm/project-metadata-utils": "1.0.2",
             "elm-community/dict-extra": "2.4.0",
             "elm-community/graph": "6.0.0",
-            "elm-community/list-extra": "8.3.1",
-            "elm-community/maybe-extra": "5.2.0",
+            "elm-community/list-extra": "8.5.1",
+            "elm-community/maybe-extra": "5.2.1",
             "elm-community/result-extra": "2.4.0",
             "elm-community/string-extra": "4.0.1",
-            "jfmengels/elm-review": "2.5.0",
+            "jfmengels/elm-review": "2.6.1",
             "stil4m/elm-syntax": "7.2.8",
-            "SiriusStarr/elm-review-no-unsorted": "1.0.5"
+            "SiriusStarr/elm-review-no-unsorted": "1.0.6"
         },
         "indirect": {
             "avh4/elm-fifo": "1.0.4",
