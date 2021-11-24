@@ -1228,6 +1228,23 @@ func =
     { foo = "foo", bar = 1, baz = Nothing }
 """
                         ]
+        , test "does not recurse infinitely by a typevar being assigned to itself" <|
+            \() ->
+                """module A exposing (..)
+
+type alias C z = { y : z }
+
+c : C a -> a
+c = .y
+
+foo : { a | field : Int } -> C x -> Int
+foo _ _ = 0
+
+record =
+    { f = foo (c 1) (c 2) }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
         ]
 
 
