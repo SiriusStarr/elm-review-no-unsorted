@@ -987,6 +987,46 @@ z =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "ports are not helpers" <|
+            \() ->
+                """port module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port calledInB : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersBefore
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "is not helper if used in multiple funcs" <|
             \() ->
                 """module A exposing
@@ -1359,6 +1399,46 @@ z =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "ports are not helpers" <|
+            \() ->
+                """port module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port calledInB : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo
+
+type alias Z =
+    A
+
+b =
+    bar calledInB
+
+z =
+    zed
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueHelpersAfter
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "fails when not ordered" <|
             \() ->
                 """module A exposing
@@ -1651,6 +1731,46 @@ z =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "ports are not dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port help : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "is not a dependency if in exactly one func" <|
             \() ->
                 """module A exposing
@@ -1822,6 +1942,46 @@ z =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "ports are not dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port help : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterFirstDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "fails when not ordered and removes cycles" <|
             \() ->
                 """module A exposing
@@ -1953,6 +2113,46 @@ z =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "ports are not dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port help : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesBeforeLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "fails when not ordered and removes cycles" <|
             \() ->
                 """module A exposing
@@ -2078,6 +2278,46 @@ help =
 """
                     |> Review.Test.run
                         (sortTopLevelDeclarations
+                            |> exposedOrderWithPrivateLast
+                            |> alphabetically
+                            |> glueDependenciesAfterLastDependent
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
+        , test "ports are not dependencies" <|
+            \() ->
+                """module A exposing
+    ( A, a
+    , Z
+    )
+
+{-|
+
+@docs A, a
+@docs Z
+
+-}
+
+port help : String -> Cmd msg
+
+type A
+    = A
+
+a =
+    foo help
+
+type alias Z =
+    A
+
+b =
+    bar help
+
+z =
+    zed help
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> portsFirst
                             |> exposedOrderWithPrivateLast
                             |> alphabetically
                             |> glueDependenciesAfterLastDependent
