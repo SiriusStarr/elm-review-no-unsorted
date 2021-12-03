@@ -564,8 +564,8 @@ glueDependenciesBeforeFirstDependent (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be dependencies
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be dependencies
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
                             |> Maybe.map (GluedBeforeFirst << Tuple.first)
@@ -602,8 +602,8 @@ glueDependenciesAfterFirstDependent (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be dependencies
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be dependencies
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
                             |> Maybe.map (GluedAfterFirst << Tuple.first)
@@ -640,8 +640,8 @@ glueDependenciesBeforeLastDependent (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be dependencies
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be dependencies
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
                             |> Maybe.map (GluedBeforeLast << Tuple.first)
@@ -678,8 +678,8 @@ glueDependenciesAfterLastDependent (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be dependencies
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be dependencies
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate (\( _, numberUsedIn ) -> numberUsedIn > 1)
                             |> Maybe.map (GluedAfterLast << Tuple.first)
@@ -719,8 +719,8 @@ glueHelpersBefore (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be helpers
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be helpers
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate ((==) 1 << Tuple.second)
                             |> Maybe.map (GluedBeforeFirst << Tuple.first)
@@ -760,8 +760,8 @@ glueHelpersAfter (RuleConfig r) =
         { r
             | glues =
                 (\( i, d ) ds ->
-                    -- Only unexposed can be helpers
-                    if d.exposedOrder == Nothing then
+                    -- Only unexposed functions can be helpers
+                    if d.exposedOrder == Nothing && d.type_ == Function then
                         findDependencies ( i, d ) ds
                             |> validate ((==) 1 << Tuple.second)
                             |> Maybe.map (GluedAfterFirst << Tuple.first)
