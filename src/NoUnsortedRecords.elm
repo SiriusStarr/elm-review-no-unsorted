@@ -2878,8 +2878,19 @@ inferExprType local =
                     inferApplicationChain local es
                         |> Maybe.map getType
 
-                LambdaExpression { expression } ->
-                    go expression
+                LambdaExpression { args, expression } ->
+                    let
+                        unwrapArgs : List String -> Maybe Type
+                        unwrapArgs xs =
+                            ListX.uncons xs
+                                |> MaybeX.unpack (\() -> go expression)
+                                    (\( x, xs_ ) ->
+                                        unwrapArgs xs_
+                                            |> Maybe.map (\t -> FunctionType { from = TypeVar Nothing x, to = t })
+                                    )
+                    in
+                    List.indexedMap (\i _ -> "lambda arg" ++ String.fromInt i) args
+                        |> unwrapArgs
 
                 RecordAccess e accessFunc ->
                     go e

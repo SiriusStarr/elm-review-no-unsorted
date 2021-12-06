@@ -2276,6 +2276,28 @@ type alias B = { bar : List (List String), foo : Int, baz : Char }
 func = { foo = 3, bar = [ [], ([3, 4]) ], baz = '2' }
 """
                         ]
+        , test "infers lambdas" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int -> Int, baz : Char }
+type alias B = { bar : Int, foo : Int, baz : Char }
+
+func = { bar = \\i -> i + 1, foo = 3, baz = '2' }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 8 }, end = { row = 6, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int -> Int, baz : Char }
+type alias B = { bar : Int, foo : Int, baz : Char }
+
+func = { foo = 3, bar = \\i -> i + 1, baz = '2' }
+"""
+                        ]
         , test "can disambiguate by type with record types" <|
             \() ->
                 """module A exposing (..)
