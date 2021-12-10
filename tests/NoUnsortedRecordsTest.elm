@@ -2276,6 +2276,26 @@ type alias B = { bar : List (List String), foo : Int, baz : Char }
 func = { foo = 3, bar = [ [], ([3, 4]) ], baz = '2' }
 """
                         ]
+        , test "does not incorrectly infer Nothings" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { foo : Maybe Int, bar : Maybe Float }
+
+a = { foo = Nothing, bar = Nothing }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+                    , test "does not incorrectly infer nested Nothings" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Maybe Int, bar : Maybe Float }, er : Int }
+
+a = { yi = { foo = Nothing, bar = Nothing }, er = 2 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
         , test "infers lambdas" <|
             \() ->
                 """module A exposing (..)
