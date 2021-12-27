@@ -220,6 +220,74 @@ toString custom1 custom2 =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
+        , test "control flow is not mangled by transitive assumption" <|
+            \() ->
+                """module A exposing (..)
+
+type T
+    = A
+    | B
+    | C String
+    | D Int
+
+foo t1 t2=
+    case ( t1, t2 ) of
+        ( A, _ ) ->
+            Just A
+
+        ( _, A ) ->
+            Just A
+
+        ( _, C s ) ->
+            Just (C s)
+
+        ( C s, _ ) ->
+            Just (C s)
+
+        ( B, _ ) ->
+            Just B
+
+        ( _, B ) ->
+            Just B
+
+        ( D _, D i ) ->
+            Just (D i)
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type T
+    = A
+    | B
+    | C String
+    | D Int
+
+foo t1 t2=
+    case ( t1, t2 ) of
+        ( A, _ ) ->
+            Just A
+
+        ( _, A ) ->
+            Just A
+
+        ( _, C s ) ->
+            Just (C s)
+
+        ( B, _ ) ->
+            Just B
+
+        ( C s, _ ) ->
+            Just (C s)
+
+        ( _, B ) ->
+            Just B
+
+        ( D _, D i ) ->
+            Just (D i)
+"""
+                        ]
         , test "preserves control flow when sorting would destroy it with lists" <|
             \() ->
                 """module A exposing (..)
