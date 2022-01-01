@@ -488,7 +488,7 @@ gluedListToDAG ds =
             -- Check if it is acyclic
             Graph.stronglyConnectedComponents g
                 |> ResultX.extract
-                    -- IF not, get all edges between strongly-connected nodes
+                    -- If not, get all edges between strongly-connected nodes
                     (List.concatMap (List.map (\{ from, to } -> ( from, to )) << Graph.edges)
                         >> Set.fromList
                         >> (\toRemove ->
