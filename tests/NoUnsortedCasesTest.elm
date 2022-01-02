@@ -1109,7 +1109,7 @@ toString custom string =
             -- Bar
             "Bar"
 
-        ( Baz, Foo ) ->
+        ( Baz, foo ) ->
             -- Baz
             "Baz"
 
@@ -1149,7 +1149,7 @@ toString custom string =
             -- Bar
             "Bar"
 
-        ( Baz, Foo ) ->
+        ( Baz, foo ) ->
             -- Baz
             "Baz"
 
