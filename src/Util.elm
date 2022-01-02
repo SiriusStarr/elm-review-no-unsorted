@@ -16,6 +16,7 @@ module Util exposing
 -}
 
 import Dict exposing (Dict)
+import Dict.Extra as DictX
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
@@ -268,27 +269,68 @@ createFix extractSource sorted =
 
 
 {-| Given context and a list of ordering functions, check if a list is sorted
-and generate errors if it isn't.
+and generate errors if it isn't. Ordering functions are applied in order, with
+ties being broken by the next function in the list. Earlier ordering functions
+will never be invalidated by later ones (i.e. there is no transitivity
+assumptions made between ordering functions).
 -}
 checkSorting : (Range -> String) -> String -> List ({ a | range : Range } -> { a | range : Range } -> Order) -> Range -> List { a | range : Range } -> List (Error {})
 checkSorting extractSource errorConcerns orderings errorRange ds =
     let
-        indexed : List ( Int, { a | range : Range } )
+        indexed : List (Graph.Node { a | range : Range })
         indexed =
-            List.indexedMap Tuple.pair ds
+            List.indexedMap (\i d -> { id = i, label = d }) ds
+
+        eliminateCycles : Graph { a | range : Range } Int -> AcyclicGraph { a | range : Range } Int
+        eliminateCycles g =
+            -- Check if it is acyclic
+            Graph.stronglyConnectedComponents g
+                |> ResultX.extract
+                    -- If not, get all edges between strongly-connected nodes
+                    (List.concatMap Graph.edges
+                        -- Group them by priority
+                        >> DictX.groupBy .label
+                        >> Dict.values
+                        -- Select lowest priority edges
+                        >> ListX.last
+                        >> Maybe.withDefault []
+                        >> List.map (\{ from, to } -> ( from, to ))
+                        >> Set.fromList
+                        -- Eliminate edges and rebuild graph
+                        >> (\toRemove ->
+                                Graph.edges g
+                                    |> List.filter (\{ from, to } -> not <| Set.member ( from, to ) toRemove)
+                                    |> Graph.fromNodesAndEdges indexed
+                                    -- Repeat the process if necessary
+                                    |> eliminateCycles
+                           )
+                    )
     in
-    List.sortWith
-        (\( i1, d1 ) ( i2, d2 ) ->
-            -- Sort stably
-            (\() -> compare i1 i2)
-                |> fallbackCompareFor (compareByOrderings orderings d1 d2)
-        )
-        indexed
+    (case orderings of
+        [ o ] ->
+            -- If there is only one sorting function, we needn't worry about
+            -- weird transitivity issues, so simply sort stably.
+            List.sortWith
+                (\d1 d2 ->
+                    (\() -> compare d1.id d2.id)
+                        |> fallbackCompareFor (o d1.label d2.label)
+                )
+                indexed
+
+        os ->
+            -- Otherwise, generate all pairwise edges, then eliminate cycles by
+            -- ignoring lower priority sorts first.
+            genEdges os indexed
+                |> Graph.fromNodesAndEdges indexed
+                |> eliminateCycles
+                |> Graph.topologicalSort
+                |> List.map .node
+    )
         -- Check if sorted
         |> (\sorted ->
-                if List.map Tuple.first sorted /= List.map Tuple.first indexed then
+                if List.map .id sorted /= List.map .id indexed then
                     -- Generate a fix if unsorted
-                    List.map (Tuple.mapSecond .range) sorted
+                    List.map (\{ id, label } -> ( id, label.range )) sorted
                         |> createFix extractSource
                         |> unsortedError errorConcerns errorRange
                         |> List.singleton
@@ -296,6 +338,43 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
                 else
                     []
            )
+
+
+{-| Generate edges for every pairwise combination of nodes, along with their
+priority (lower number is higher priority).
+-}
+genEdges : List ({ a | range : Range } -> { a | range : Range } -> Order) -> List (Graph.Node { a | range : Range }) -> List (Edge Int)
+genEdges orderings indexed =
+    let
+        genEdge : List ( Int, { a | range : Range } -> { a | range : Range } -> Order ) -> ( Graph.Node { a | range : Range }, Graph.Node { a | range : Range } ) -> Maybe (Edge Int)
+        genEdge os ( d1, d2 ) =
+            case os of
+                ( priority, o ) :: os_ ->
+                    case o d1.label d2.label of
+                        EQ ->
+                            genEdge os_ ( d1, d2 )
+
+                        LT ->
+                            Just { from = d1.id, to = d2.id, label = priority }
+
+                        GT ->
+                            Just { from = d2.id, to = d1.id, label = priority }
+
+                [] ->
+                    -- Unsortable, so simply use original order
+                    case compare d1.id d2.id of
+                        LT ->
+                            Just { from = d1.id, to = d2.id, label = 0 }
+
+                        GT ->
+                            Just { from = d2.id, to = d1.id, label = 0 }
+
+                        EQ ->
+                            -- This should never happen
+                            Nothing
+    in
+    ListX.uniquePairs indexed
+        |> List.filterMap (genEdge <| List.indexedMap Tuple.pair orderings)
 
 
 {-| Given a list of ordering functions for breaking ties, order to things.
