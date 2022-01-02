@@ -92,13 +92,24 @@ foo =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
-        , test "fails when unordered" <|
+        , test "fails when unordered " <|
             \() ->
                 """module A exposing (..)
+{-| A
+-}
+
+{-| foo
+-}
 foo =
     z
+
+{-| bar
+-}
 bar =
     x
+
+{-| baz
+-}
 baz =
     y
 """
@@ -110,10 +121,21 @@ baz =
                     |> Review.Test.expectErrors
                         [ unsortedError False
                             |> Review.Test.whenFixed """module A exposing (..)
+{-| A
+-}
+
+{-| bar
+-}
 bar =
     x
+
+{-| baz
+-}
 baz =
     y
+
+{-| foo
+-}
 foo =
     z
 """
@@ -156,6 +178,8 @@ bar =
 {-| This isn't!
 -}
 type alias Zed = {}
+{-| foo
+-}
 foo =
     z
 baz =
@@ -179,6 +203,8 @@ bar =
 
 baz =
     y
+{-| foo
+-}
 foo =
     z
 {-| This isn't!
@@ -296,13 +322,13 @@ z =
         , test "fails when unsorted" <|
             \() ->
                 """module A exposing
-    ( A, a
+    ( a, A
     , Z
     )
 
 {-|
 
-@docs A, a
+@docs a, A
 @docs Z
 
 -}
@@ -312,7 +338,8 @@ b =
 
 z =
     zed
-
+{-| A
+-}
 type A
     = A
 
@@ -331,23 +358,24 @@ a =
                     |> Review.Test.expectErrors
                         [ unsortedError False
                             |> Review.Test.whenFixed """module A exposing
-    ( A, a
+    ( a, A
     , Z
     )
 
 {-|
 
-@docs A, a
+@docs a, A
 @docs Z
 
 -}
 
-type A
-    = A
-
 a =
     foo
 
+{-| A
+-}
+type A
+    = A
 type alias Z =
     A
 
