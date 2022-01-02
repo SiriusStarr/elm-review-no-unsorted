@@ -515,7 +515,8 @@ typesFirstTests =
 
 type A
     = A
-
+{-| Z
+-}
 type alias Z =
     A
 
@@ -524,7 +525,8 @@ z =
 
 a =
     foo
-
+{-| Port doc comment
+-}
 port b: String -> Cmd msg
 
 c =
@@ -554,7 +556,8 @@ c =
 
 c =
     bar
-
+{-| Port doc comment
+-}
 port b: String -> Cmd msg
 
 type A
@@ -562,7 +565,8 @@ type A
 
 z =
     zed
-
+{-| Z
+-}
 type alias Z =
     A
 
@@ -592,7 +596,8 @@ a =
 
 type A
     = A
-
+{-| Z
+-}
 type alias Z =
     A
 
@@ -601,7 +606,8 @@ z =
 
 a =
     foo
-
+{-| Port doc comment
+-}
 port b: String -> Cmd msg
 
 c =
