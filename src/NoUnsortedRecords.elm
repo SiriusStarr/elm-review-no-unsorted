@@ -1465,6 +1465,44 @@ assignTypeVars typeVars type_ =
     DereferencedType <| go <| getType type_
 
 
+{-| Prefix a string before type variables so as to disambiguate them for type
+matching.
+-}
+prefixTypeVars : String -> DereferencedType -> DereferencedType
+prefixTypeVars prefix type_ =
+    let
+        go : Type -> Type
+        go t =
+            case t of
+                FunctionType { from, to } ->
+                    FunctionType { from = go from, to = go to }
+
+                TupleType ts ->
+                    TupleType <| List.map go ts
+
+                ListType t_ ->
+                    ListType <| go t_
+
+                NamedType ( moduleName, name ) ts ->
+                    List.map go ts
+                        |> NamedType ( moduleName, name )
+
+                RecordType r ->
+                    RecordType
+                        { r
+                            | fields = List.map (Tuple.mapSecond go) r.fields
+                            , generic = Maybe.map go r.generic
+                        }
+
+                TypeVar class var ->
+                    TypeVar class (prefix ++ var)
+
+                UnitType ->
+                    UnitType
+    in
+    DereferencedType <| go <| getType type_
+
+
 {-| Unwrap a `DereferencedType`.
 -}
 getType : DereferencedType -> Type
@@ -2618,6 +2656,18 @@ searchOrders context hasAllFields fields =
         context.canonicalRecords
 
 
+
+-- |> (\({ canonicalMatches, genericMatches } as res) ->
+--         if List.length canonicalMatches + List.length genericMatches > 1 then
+--             -- If there are multiple matches, try to disambiguate by type
+--             { canonicalMatches = List.filter (checkTypes << Tuple.second) canonicalMatches
+--             , genericMatches = List.filter (checkTypes << Tuple.second << .type_) genericMatches
+--             }
+--         else
+--             res
+--    )
+
+
 {-| Check two `Type`s and see if they are theoretically equivalent (e.g. type
 vars can match anything.
 -}
@@ -2797,16 +2847,17 @@ matchesTypeClass type_ class =
 inferExprType : LocalContext -> Node Expression -> Maybe DereferencedType
 inferExprType local =
     let
-        makeFunc : Maybe (List DereferencedType) -> Maybe Type
-        makeFunc =
-            Maybe.andThen ListX.unconsLast
+        makeFunc : String -> Maybe (List DereferencedType) -> Maybe Type
+        makeFunc typeVarPrefix =
+            Maybe.map (List.map (prefixTypeVars typeVarPrefix))
+                >> Maybe.andThen ListX.unconsLast
                 >> Maybe.map
                     (Tuple.mapBoth getType (List.map getType)
                         >> (\( r, ts ) -> makeFunctionType r ts)
                     )
 
-        go : Node Expression -> Maybe Type
-        go node =
+        go : String -> Node Expression -> Maybe Type
+        go typeVarPrefix node =
             case Node.value node of
                 UnitExpr ->
                     -- Mr. Incredible says UNIT IS UNIT.
@@ -2828,17 +2879,19 @@ inferExprType local =
                     Just <| NamedType ( [ "Char" ], "Char" ) []
 
                 TupledExpression es ->
-                    MaybeX.traverse go es
+                    List.indexedMap (\i e -> go (typeVarPrefix ++ "Tuple Expression " ++ String.fromInt i) e) es
+                        |> MaybeX.combine
                         |> Maybe.map TupleType
 
                 ListExpr es ->
                     if List.isEmpty es then
                         -- An empty list can be anything
-                        Just (ListType (TypeVar Nothing "inferred empty list typevar"))
+                        Just (ListType (TypeVar Nothing <| typeVarPrefix ++ "inferred empty list typevar"))
 
                     else
                         -- Have to check all and unify
-                        List.filterMap go es
+                        List.indexedMap (\i e -> go (typeVarPrefix ++ "List Element " ++ String.fromInt i) e) es
+                            |> MaybeX.values
                             |> unifyTypes
                             |> Maybe.map ListType
 
@@ -2850,7 +2903,7 @@ inferExprType local =
                                     ( f, e ) =
                                         Node.value n
                                 in
-                                go e
+                                go (typeVarPrefix ++ "Record Field " ++ Node.value f) e
                                     |> Maybe.map (Tuple.pair (Node.value f))
                             )
                         |> MaybeX.combine
@@ -2858,28 +2911,29 @@ inferExprType local =
 
                 FunctionOrValue _ name ->
                     findFunctionType local Nothing node name
-                        |> makeFunc
+                        |> makeFunc typeVarPrefix
 
                 ParenthesizedExpression e ->
                     -- Type is just whatever is in parentheses
-                    go e
+                    go typeVarPrefix e
 
                 Negation e ->
-                    go e
+                    go typeVarPrefix e
 
                 IfBlock _ e1 e2 ->
                     -- Try to infer either side and unify
-                    [ go e1, go e2 ]
+                    [ go (typeVarPrefix ++ "If Block True") e1, go (typeVarPrefix ++ "If Block False") e2 ]
                         |> MaybeX.values
                         |> unifyTypes
 
                 PrefixOperator p ->
                     findOperatorType local.context p
-                        |> makeFunc
+                        |> makeFunc typeVarPrefix
 
                 CaseExpression { cases } ->
                     -- Try to infer all cases and unify
-                    List.filterMap (go << Tuple.second) cases
+                    List.indexedMap (\i ( _, e ) -> go (typeVarPrefix ++ "Case Expression " ++ String.fromInt i) e) cases
+                        |> MaybeX.values
                         |> unifyTypes
 
                 Application es ->
@@ -2891,17 +2945,17 @@ inferExprType local =
                         unwrapArgs : List String -> Maybe Type
                         unwrapArgs xs =
                             ListX.uncons xs
-                                |> MaybeX.unpack (\() -> go expression)
+                                |> MaybeX.unpack (\() -> go typeVarPrefix expression)
                                     (\( x, xs_ ) ->
                                         unwrapArgs xs_
-                                            |> Maybe.map (\t -> FunctionType { from = TypeVar Nothing x, to = t })
+                                            |> Maybe.map (\t -> FunctionType { from = TypeVar Nothing <| typeVarPrefix ++ x, to = t })
                                     )
                     in
                     List.indexedMap (\i _ -> "lambda arg" ++ String.fromInt i) args
                         |> unwrapArgs
 
                 RecordAccess e accessFunc ->
-                    go e
+                    go typeVarPrefix e
                         |> Maybe.map DereferencedType
                         |> getRecordFieldTypes
                         |> (\ts ->
@@ -2923,11 +2977,11 @@ inferExprType local =
                                         { from =
                                             RecordType
                                                 -- This is, in essence, a generic record with one field
-                                                { generic = Just <| TypeVar Nothing <| "record access inferred for " ++ f
+                                                { generic = Just <| TypeVar Nothing <| typeVarPrefix ++ "record access inferred for " ++ f
                                                 , canonical = False
-                                                , fields = [ ( f, TypeVar Nothing <| "record access inferred field for " ++ f ) ]
+                                                , fields = [ ( f, TypeVar Nothing <| typeVarPrefix ++ "record access inferred field for " ++ f ) ]
                                                 }
-                                        , to = TypeVar Nothing <| "record access inferred field for " ++ f
+                                        , to = TypeVar Nothing <| typeVarPrefix ++ "record access inferred field for " ++ f
                                         }
                            )
 
@@ -2947,24 +3001,25 @@ inferExprType local =
                                 |> Dict.fromList
                     in
                     inferExprType { local | localFunctions = Dict.union local.localFunctions newBindings } expression
+                        |> Maybe.map (prefixTypeVars typeVarPrefix)
                         |> Maybe.map getType
 
                 RecordUpdateExpression var fs ->
                     findFunctionType local Nothing var (Node.value var)
-                        |> makeFunc
+                        |> makeFunc typeVarPrefix
                         |> MaybeX.orElse
-                            (MaybeX.traverse ((\( f, e ) -> go e |> Maybe.map (Tuple.pair (Node.value f))) << Node.value) fs
+                            (MaybeX.traverse ((\( f, e ) -> go (typeVarPrefix ++ "Record Update Field " ++ Node.value f) e |> Maybe.map (Tuple.pair (Node.value f))) << Node.value) fs
                                 |> Maybe.map
                                     (\fields ->
                                         RecordType
-                                            { generic = Just <| TypeVar Nothing "inferred update generic"
+                                            { generic = Just <| TypeVar Nothing <| typeVarPrefix ++ "inferred update generic"
                                             , canonical = False
                                             , fields = fields
                                             }
                                     )
                             )
     in
-    go
+    go ""
         >> Maybe.map DereferencedType
 
 
