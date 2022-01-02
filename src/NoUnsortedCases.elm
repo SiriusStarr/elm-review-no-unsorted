@@ -33,7 +33,7 @@ import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameF
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
-import Util exposing (checkSorting, fallbackCompareFor, validate)
+import Util exposing (checkSorting, fallbackCompareFor, fallbackCompareWithUnsortableFor, validate)
 
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -847,12 +847,13 @@ expressionVisitor config node context =
                     { r | end = { row = r.start.row, column = r.start.column + 4 } }
             in
             -- Convert all patterns to sortable ones, if we can
-            MaybeX.traverse
-                (\( p, e ) ->
+            ListX.indexedFoldr
+                (\i ( p, e ) acc ->
                     getSortablePattern config context p
                         |> Maybe.map
                             (\sP ->
                                 { pattern = sP
+                                , index = i
                                 , range =
                                     Range.combine
                                         [ Node.range p
@@ -860,9 +861,21 @@ expressionVisitor config node context =
                                         ]
                                 }
                             )
+                        |> Maybe.map2 (\acc_ sP -> sP :: acc_) acc
                 )
+                (Just [])
                 cases
-                |> Maybe.map (checkSorting context.extractSource "Case patterns" [ \c1 c2 -> comparePatterns config c1.pattern c2.pattern ] errorRange)
+                |> Maybe.map
+                    (checkSorting context.extractSource
+                        "Case patterns"
+                        [ -- Sort by control flow preservation first
+                          \c1 c2 -> compareByControlFlow config ( c1.index, c1.pattern ) ( c2.index, c2.pattern )
+
+                        -- Then by ordering
+                        , \c1 c2 -> Maybe.withDefault EQ <| comparePatterns config c1.pattern c2.pattern
+                        ]
+                        errorRange
+                    )
                 |> Maybe.withDefault []
 
         _ ->
@@ -1017,42 +1030,149 @@ getActualPattern node =
 
 {-| Compare two literal types, determining their order (if not a type error).
 -}
-compareLiteral : LiteralPattern -> LiteralPattern -> Order
+compareLiteral : LiteralPattern -> LiteralPattern -> Maybe Order
 compareLiteral l1 l2 =
     case ( l1, l2 ) of
         ( CharLiteral c1, CharLiteral c2 ) ->
-            compare c1 c2
+            Just <| compare c1 c2
 
         ( StringLiteral s1, StringLiteral s2 ) ->
-            compare s1 s2
+            Just <| compare s1 s2
 
         ( IntLiteral i1, IntLiteral i2 ) ->
-            compare i1 i2
+            Just <| compare i1 i2
 
         ( FloatLiteral f1, FloatLiteral f2 ) ->
-            compare f1 f2
+            Just <| compare f1 f2
 
         _ ->
             -- This is a type error, so ignore it
+            Nothing
+
+
+{-| Sort two patterns by the preservation of control flow, e.g. assuring that
+wildcards are not moved before non-wildcards. If this function returns `EQ`,
+then the two patterns may have their order switched safely.
+-}
+compareByControlFlow : RuleConfig -> ( Int, SortablePattern ) -> ( Int, SortablePattern ) -> Order
+compareByControlFlow config ( i1, pat1 ) ( i2, pat2 ) =
+    let
+        go : SortablePattern -> SortablePattern -> Order
+        go p1 p2 =
+            compareByControlFlow config ( i1, p1 ) ( i2, p2 )
+    in
+    case ( pat1, pat2 ) of
+        -- If both are wildcards, then they do not have defined order
+        ( Wildcard, Wildcard ) ->
             EQ
+
+        -- Wildcards cannot be moved relative to non-wildcards, so return index order
+        ( Wildcard, _ ) ->
+            compare i1 i2
+
+        ( _, Wildcard ) ->
+            compare i1 i2
+
+        ( Constructor c1, Constructor c2 ) ->
+            let
+                goSubs : List (Maybe SortablePattern) -> List (Maybe SortablePattern) -> () -> Order
+                goSubs pat1s pat2s () =
+                    case ( pat1s, pat2s ) of
+                        -- Wildcards cannot be moved compared to things we can't sort
+                        ( (Just Wildcard) :: _, Nothing :: _ ) ->
+                            compare i1 i2
+
+                        ( Nothing :: _, (Just Wildcard) :: _ ) ->
+                            compare i1 i2
+
+                        ( p1 :: p1s, p2 :: p2s ) ->
+                            -- Check each subpattern sequentially for control flow ordering
+                            goSubs p1s p2s
+                                |> fallbackCompareFor (Maybe.withDefault EQ <| Maybe.map2 go p1 p2)
+
+                        _ ->
+                            -- Either exhausted subpatterns with no problems or a type error
+                            EQ
+            in
+            if c1.order == c2.order then
+                -- If the constructors are the same, then control flow confusion could occur in subpatterns
+                goSubs c1.subpatterns c2.subpatterns ()
+
+            else
+                -- Otherwise, no possibility of control flow confusion, as constructors are different
+                EQ
+
+        -- Lists, Tuples, and Uncons
+        ( ListTupleOrUncons r1, ListTupleOrUncons r2 ) ->
+            if safelySortableListPatterns config r1 r2 then
+                -- Can safely sort them
+                EQ
+
+            else
+                -- Otherwise, enforce ordering
+                compare i1 i2
+
+        -- Anything else is a type error or has no wildcards, so we needn't consider it
+        _ ->
+            EQ
+
+
+{-| Check if list/tuple/uncons patterns can safely be sorted by making certain
+neither would override the other's control flow.
+-}
+safelySortableListPatterns : RuleConfig -> { subpatterns : List SortablePattern, terminates : Bool } -> { subpatterns : List SortablePattern, terminates : Bool } -> Bool
+safelySortableListPatterns config r1 r2 =
+    case ( r1.subpatterns, r2.subpatterns ) of
+        ( x :: xs, y :: ys ) ->
+            -- Check if the head of the lists is sortable
+            case comparePatterns config x y of
+                Just EQ ->
+                    -- If the left-most subpatterns are equal, then they are sortable if the next subpattern is sortable, so recurse
+                    safelySortableListPatterns config
+                        { r1 | subpatterns = xs }
+                        { r2 | subpatterns = ys }
+
+                Just _ ->
+                    -- If the left-most subpattern is sortable, then they can be distinguished and so are safely sortable
+                    True
+
+                Nothing ->
+                    -- If the left-most subpattern is not sortable, they cannot be sorted
+                    False
+
+        ( [], [] ) ->
+            -- Both have been exhausted, so no problems sorting them
+            True
+
+        ( [], _ ) ->
+            -- r1 is shorter than r2, so it is safe to sort it if it terminates
+            r1.terminates
+
+        ( _, [] ) ->
+            -- r2 is shorter than r1, so it is safe to sort it if it terminates
+            r2.terminates
 
 
 {-| Compare two sortable patterns, determining their order (if not a type error).
 -}
-comparePatterns : RuleConfig -> SortablePattern -> SortablePattern -> Order
-comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
+comparePatterns : RuleConfig -> SortablePattern -> SortablePattern -> Maybe Order
+comparePatterns ((RuleConfig { lookPastUnsortable }) as ruleConfig) pat1 pat2 =
     let
-        go : SortablePattern -> SortablePattern -> Order
+        go : SortablePattern -> SortablePattern -> Maybe Order
         go p1 p2 =
             comparePatterns ruleConfig p1 p2
     in
     case ( pat1, pat2 ) of
-        -- Wildcards cannot be moved relative to non-wildcards, so return EQ which ensures index is used.
+        -- Wildcards can be sorted past if both are wild
+        ( Wildcard, Wildcard ) ->
+            Just EQ
+
+        -- Wildcards cannot be moved relative to non-wildcards, so return Nothing, which ensures that they are not sorted past.
         ( Wildcard, _ ) ->
-            EQ
+            Nothing
 
         ( _, Wildcard ) ->
-            EQ
+            Nothing
 
         -- Literals are simply compared; if sorting literals is turned off, then LiteralPatterns are not created at all
         ( Literal l1, Literal l2 ) ->
@@ -1061,24 +1181,28 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
         --Constructors are compared by index, then by comparing subpatterns sequentially, failing if a non-sortable subpattern is encountered
         ( Constructor c1, Constructor c2 ) ->
             let
-                goSubs : List (Maybe SortablePattern) -> List (Maybe SortablePattern) -> () -> Order
+                goSubs : List (Maybe SortablePattern) -> List (Maybe SortablePattern) -> () -> Maybe Order
                 goSubs pat1s pat2s () =
-                    case ( pat1s, pat2s, config.lookPastUnsortable ) of
+                    case ( pat1s, pat2s, lookPastUnsortable ) of
                         ( (Just p1) :: p1s, (Just p2) :: p2s, _ ) ->
                             goSubs p1s p2s
-                                |> fallbackCompareFor (go p1 p2)
+                                |> fallbackCompareWithUnsortableFor (go p1 p2)
 
                         ( Nothing :: p1s, Nothing :: p2s, True ) ->
                             -- If at the point where arguments are both unsortable, then proceed past if configured to
                             goSubs p1s p2s ()
 
+                        ( [], [], _ ) ->
+                            -- Both lists of subpatterns exhausted without a "winner", so return EQ
+                            Just EQ
+
                         _ ->
                             -- Lists should be even, so other cases aren't sortable
-                            EQ
+                            Nothing
             in
             -- Fallback to subpatterns
             goSubs c1.subpatterns c2.subpatterns
-                |> fallbackCompareFor (compare c1.order c2.order)
+                |> fallbackCompareWithUnsortableFor (Just <| compare c1.order c2.order)
 
         -- Lists, Tuples, and Uncons
         ( ListTupleOrUncons r1, ListTupleOrUncons r2 ) ->
@@ -1089,45 +1213,59 @@ comparePatterns ((RuleConfig config) as ruleConfig) pat1 pat2 =
             of
                 -- If the lists are the same length, infinite ones go later
                 ( ( [], False ), ( [], True ) ) ->
-                    GT
+                    Just GT
 
                 ( ( [], True ), ( [], False ) ) ->
-                    LT
+                    Just LT
 
                 ( ( [], _ ), ( [], _ ) ) ->
-                    EQ
+                    Just EQ
 
                 -- If one list is shorter than another, it goes after if it is infinite or before if it isn't
                 ( ( _ :: _, _ ), ( [], True ) ) ->
-                    GT
+                    Just GT
 
                 ( ( _ :: _, _ ), ( [], False ) ) ->
-                    LT
+                    Just LT
 
                 ( ( [], True ), ( _ :: _, _ ) ) ->
-                    LT
+                    Just LT
 
                 ( ( [], False ), ( _ :: _, _ ) ) ->
-                    GT
+                    Just GT
 
                 -- Otherwise, compare the lists sequentially
-                ( ( p1s, _ ), ( p2s, _ ) ) ->
-                    if config.sortLists == LengthFirst then
-                        (\() ->
-                            List.map2 go p1s p2s
-                                |> ListX.find ((/=) EQ)
-                                |> Maybe.withDefault EQ
-                        )
-                            |> fallbackCompareFor (comparePatternListLengths r1 r2)
-
-                    else
-                        List.map2 go p1s p2s
-                            |> ListX.find ((/=) EQ)
-                            |> Maybe.withDefault EQ
+                ( ( p1 :: p1s, _ ), ( p2 :: p2s, _ ) ) ->
+                    compareNonemptyListPatterns ruleConfig ( r1, p1, p1s ) ( r2, p2, p2s )
 
         -- Anything else should be a type error, so we needn't consider it
         _ ->
-            EQ
+            Nothing
+
+
+{-| Compare nonempty list/tuple/uncons pattern sorting by checking by length (if
+configured to) and element-wise.
+-}
+compareNonemptyListPatterns : RuleConfig -> ( { subpatterns : List SortablePattern, terminates : Bool }, SortablePattern, List SortablePattern ) -> ( { subpatterns : List SortablePattern, terminates : Bool }, SortablePattern, List SortablePattern ) -> Maybe Order
+compareNonemptyListPatterns ((RuleConfig { sortLists }) as config) ( r1, p1, p1s ) ( r2, p2, p2s ) =
+    let
+        checkSubs : () -> Maybe Order
+        checkSubs () =
+            case comparePatterns config p1 p2 of
+                Just EQ ->
+                    comparePatterns config
+                        (ListTupleOrUncons { r1 | subpatterns = p1s })
+                        (ListTupleOrUncons { r2 | subpatterns = p2s })
+
+                ltOrGtOrNothing ->
+                    ltOrGtOrNothing
+    in
+    if sortLists == LengthFirst then
+        checkSubs
+            |> fallbackCompareWithUnsortableFor (Just <| comparePatternListLengths r1 r2)
+
+    else
+        checkSubs ()
 
 
 {-| Compare the list lengths of two lists of `SortablePattern`, with the caveat
