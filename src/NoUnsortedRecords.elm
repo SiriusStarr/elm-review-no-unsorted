@@ -2553,11 +2553,19 @@ searchOrders context hasAllFields fields =
         checkTypes { order } =
             List.foldl
                 (\{ field, type_ } ( varAcc, matchAcc ) ->
+                    let
+                        assignedVars : Dict ( Int, String ) Type
+                        assignedVars =
+                            -- Only keep type variables assigned on the known record, since fields are independent
+                            -- For example, { a = Nothing, b = Nothing } should not require `a` and `b` to have the
+                            -- same type variable (but it does for the known record if they are both `Maybe var`)
+                            Dict.filter (\( i, _ ) _ -> i == 2) varAcc
+                    in
                     Dict.get field order
                         |> Maybe.map (dereferenceType context << Tuple.second)
-                        |> Maybe.map2 (typesMatch varAcc) type_
+                        |> Maybe.map2 (typesMatch assignedVars) type_
                         -- If any `Nothing`s were encountered, we're missing type info
-                        |> Maybe.withDefault ( varAcc, True )
+                        |> Maybe.withDefault ( assignedVars, True )
                         |> Tuple.mapSecond ((&&) matchAcc)
                 )
                 ( Dict.empty, True )
