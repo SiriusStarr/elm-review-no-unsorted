@@ -958,7 +958,7 @@ docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonica
                 |> Maybe.withDefault ( currentModule, qualified )
                 |> (\( mod, name ) ->
                         makeList mod name args
-                            |> Maybe.withDefault (NamedType ( mod, name ) <| List.map go args)
+                            |> MaybeX.withDefaultLazy (\() -> NamedType ( mod, name ) <| List.map go args)
                    )
 
         Elm.Type.Record fields generic ->
@@ -1308,7 +1308,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
                 |> Tuple.pair (Tuple.second <| Node.value name)
                 |> (\( n, moduleName ) ->
                         makeList moduleName n args
-                            |> Maybe.withDefault (NamedType ( moduleName, n ) <| List.map go args)
+                            |> MaybeX.withDefaultLazy (\() -> NamedType ( moduleName, n ) <| List.map go args)
                    )
 
         Unit ->
@@ -1527,7 +1527,7 @@ checkFunctionArgsAndExpr config local hasType args expr =
             Maybe.map flattenFunctionType hasType
                 |> Maybe.andThen (partiallyApplyArgsAndTypes args)
                 |> Maybe.map (Tuple.mapBoth (List.map Just) Just)
-                |> Maybe.withDefault ( List.map (always Nothing) args, Nothing )
+                |> MaybeX.withDefaultLazy (\() -> ( List.map (always Nothing) args, Nothing ))
 
         newBindings : Dict String Type
         newBindings =
@@ -1602,7 +1602,7 @@ bindingsInPatternWithType context pattern type_ =
                 |> Maybe.map (List.map2 (\p t -> go p (Just t)) ps)
                 |> Maybe.map List.concat
                 -- No type info
-                |> Maybe.withDefault (List.concatMap (\p -> go p Nothing) ps)
+                |> MaybeX.withDefaultLazy (\() -> List.concatMap (\p -> go p Nothing) ps)
 
         UnConsPattern p ps ->
             -- `p` has type in list, and `ps` is overall list type
@@ -1777,7 +1777,7 @@ checkExpression config local hasType node =
                 updateType =
                     -- Get type from updated var if we don't have a good annotation
                     hasType
-                        |> MaybeX.orElse (inferExprType local node)
+                        |> MaybeX.orElseLazy (\() -> inferExprType local node)
 
                 ts : Dict String DereferencedType
                 ts =
@@ -1831,13 +1831,14 @@ bindingsFromLetDeclaration local d =
         LetFunction f ->
             getFunctionBinding local.context f
                 |> Maybe.map (Tuple.mapSecond getType)
-                |> MaybeX.orElse
-                    (Node.value f.declaration
-                        |> (\{ name, expression } ->
-                                inferExprType local expression
-                                    |> Maybe.map getType
-                                    |> Maybe.map (Tuple.pair (Node.value name))
-                           )
+                |> MaybeX.orElseLazy
+                    (\() ->
+                        Node.value f.declaration
+                            |> (\{ name, expression } ->
+                                    inferExprType local expression
+                                        |> Maybe.map getType
+                                        |> Maybe.map (Tuple.pair (Node.value name))
+                               )
                     )
                 |> Maybe.map List.singleton
                 |> Maybe.withDefault []
@@ -1899,7 +1900,7 @@ checkApplicationChain config local hasType es =
                         |> Maybe.map (List.map2 (\e t -> checkExpr (Just t) e) args)
                         |> Maybe.map List.concat
                         -- Couldn't find the function type, so type info is gone now
-                        |> Maybe.withDefault (List.concatMap (checkExpr Nothing) es)
+                        |> MaybeX.withDefaultLazy (\() -> List.concatMap (checkExpr Nothing) es)
 
                 PrefixOperator op ->
                     findOperatorType local.context op
@@ -1917,7 +1918,7 @@ checkApplicationChain config local hasType es =
                         |> Maybe.map (List.map2 (\e t -> checkExpr (Just t) e) args)
                         |> Maybe.map List.concat
                         -- Couldn't find the function type, so type info is gone now
-                        |> Maybe.withDefault (List.concatMap (checkExpr Nothing) es)
+                        |> MaybeX.withDefaultLazy (\() -> List.concatMap (checkExpr Nothing) es)
 
                 ParenthesizedExpression func_ ->
                     -- Unwrap the parentheses
@@ -2014,7 +2015,7 @@ findFunctionType { context, localFunctions } type_ moduleNode name =
                 else
                     Dict.get moduleName context.functionTypes
                         |> Maybe.andThen (Dict.get name)
-                        |> MaybeX.orElse (Dict.get name localFunctions)
+                        |> MaybeX.orElseLazy (\() -> Dict.get name localFunctions)
             )
         |> Maybe.map (flattenFunctionType << dereferenceType context)
 
@@ -2139,7 +2140,7 @@ checkPattern config context hasType node =
             findFunctionType { context = context, localFunctions = Dict.empty } hasType node name
                 |> Maybe.map (List.map2 (\p t -> go (Just t) p) pats)
                 |> Maybe.map List.concat
-                |> Maybe.withDefault (List.concatMap (go Nothing) pats)
+                |> MaybeX.withDefaultLazy (\() -> List.concatMap (go Nothing) pats)
 
         RecordPattern fields ->
             recordPatternToCheckable (Node.range node) hasType fields
@@ -2334,7 +2335,7 @@ recordSettersToCheckable context fullRange hasAllFields hasType =
             { field = f
             , type_ =
                 Dict.get f types
-                    |> MaybeX.orElse (inferExprType context <| Tuple.second <| Node.value r)
+                    |> MaybeX.orElseLazy (\() -> inferExprType context <| Tuple.second <| Node.value r)
             , range = Node.range r
             }
         )
@@ -3007,16 +3008,17 @@ inferExprType local =
                 RecordUpdateExpression var fs ->
                     findFunctionType local Nothing var (Node.value var)
                         |> makeFunc typeVarPrefix
-                        |> MaybeX.orElse
-                            (MaybeX.traverse ((\( f, e ) -> go (typeVarPrefix ++ "Record Update Field " ++ Node.value f) e |> Maybe.map (Tuple.pair (Node.value f))) << Node.value) fs
-                                |> Maybe.map
-                                    (\fields ->
-                                        RecordType
-                                            { generic = Just <| TypeVar Nothing <| typeVarPrefix ++ "inferred update generic"
-                                            , canonical = False
-                                            , fields = fields
-                                            }
-                                    )
+                        |> MaybeX.orElseLazy
+                            (\() ->
+                                MaybeX.traverse ((\( f, e ) -> go (typeVarPrefix ++ "Record Update Field " ++ Node.value f) e |> Maybe.map (Tuple.pair (Node.value f))) << Node.value) fs
+                                    |> Maybe.map
+                                        (\fields ->
+                                            RecordType
+                                                { generic = Just <| TypeVar Nothing <| typeVarPrefix ++ "inferred update generic"
+                                                , canonical = False
+                                                , fields = fields
+                                                }
+                                        )
                             )
     in
     go ""
@@ -3058,7 +3060,7 @@ inferApplicationChain local es =
             case Node.value func of
                 FunctionOrValue _ name ->
                     findFunctionType local Nothing func name
-                        |> MaybeX.orElse (Maybe.map flattenFunctionType <| inferExpr func)
+                        |> MaybeX.orElseLazy (\() -> Maybe.map flattenFunctionType <| inferExpr func)
                         |> Maybe.andThen (partiallyApplyArgsAndTypes args)
                         -- Assign type vars
                         |> Maybe.map (getReturnType args)
