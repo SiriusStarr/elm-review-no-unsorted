@@ -38,6 +38,7 @@ all =
         , genericRecordSupport
         , localBindingSupport
         , simpleTypeInferenceSupport
+        , subrecords
         ]
 
 
@@ -2292,7 +2293,7 @@ a = { foo = Nothing, bar = Nothing }
 
 type alias A = { yi : { foo : Maybe Int, bar : Maybe Float }, er : Int }
 
-a = { yi = { bar = Nothing, foo = Nothing }, er = 2 }
+a = { yi = { foo = Nothing, bar = Nothing }, er = 2 }
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
@@ -2511,6 +2512,208 @@ func =
 """
                     |> Review.Test.run (rule defaults)
                     |> Review.Test.expectNoErrors
+        ]
+
+
+subrecords : Test
+subrecords =
+    describe "subrecords"
+        [ test "are sorted by default in larger record" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { er = 1, yi = { bar = 2, foo = 1, baz = 3 } }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { yi = { bar = 2, foo = 1, baz = 3 } , er = 1}
+"""
+                        , unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 23 }, end = { row = 5, column = 24 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { er = 1, yi = { foo = 1, bar = 2, baz = 3 } }
+"""
+                        ]
+        , test "are sorted by default in larger record with type annotation" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : A
+func = { er = 1, yi = { bar = 2, foo = 1, baz = 3 } }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 8 }, end = { row = 6, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : A
+func = { yi = { bar = 2, foo = 1, baz = 3 } , er = 1}
+"""
+                        , unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 23 }, end = { row = 6, column = 24 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : A
+func = { er = 1, yi = { foo = 1, bar = 2, baz = 3 } }
+"""
+                        ]
+        , test "are sorted by default in sub sub record" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func = { outer = { er = 1, yi = { bar = 2, foo = 1, baz = 3 } } }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 18 }, end = { row = 5, column = 19 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func = { outer = { yi = { bar = 2, foo = 1, baz = 3 } , er = 1} }
+"""
+                        , unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 33 }, end = { row = 5, column = 34 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func = { outer = { er = 1, yi = { foo = 1, bar = 2, baz = 3 } } }
+"""
+                        ]
+        , test "are sorted by default in larger record with nested expression" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : ( Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
+
+func = { yi = (0, [ { bar = 2, foo = 1, baz = 3 } ]), er = 1 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 21 }, end = { row = 5, column = 22 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : ( Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
+
+func = { yi = (0, [ { foo = 1, bar = 2, baz = 3 } ]), er = 1 }
+"""
+                        ]
+        , test "are sorted by default in type annotations" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : { er : Int, yi : { bar : Int, foo : Int, baz : Int } }
+func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : {  yi : { bar : Int, foo : Int, baz : Int } ,er : Int}
+func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
+"""
+                        , unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 25 }, end = { row = 5, column = 26 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : { er : Int, yi : {  foo : Int,bar : Int, baz : Int } }
+func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
+"""
+                        ]
+        , test "are sorted by default in sub sub record of type annotation" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func : { outer : { er : Int, yi : { bar : Int, foo : Int, baz : Int } } }
+func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 18 }, end = { row = 5, column = 19 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func : { outer : {  yi : { bar : Int, foo : Int, baz : Int } ,er : Int} }
+func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
+"""
+                        , unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 35 }, end = { row = 5, column = 36 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
+
+func : { outer : { er : Int, yi : {  foo : Int,bar : Int, baz : Int } } }
+func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
+"""
+                        ]
+        , test "are sorted by default in larger record with nested expression in type annotation" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : ( Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
+
+func : { yi : (Int, List { bar : Int, foo : Int, baz : Int }), er : Int }
+func = { yi = (0, []), er = 1 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 26 }, end = { row = 5, column = 27 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : ( Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
+
+func : { yi : (Int, List {  foo : Int,bar : Int, baz : Int }), er : Int }
+func = { yi = (0, []), er = 1 }
+"""
+                        ]
         ]
 
 
