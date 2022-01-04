@@ -92,7 +92,7 @@ foo =
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
-        , test "fails when unordered " <|
+        , test "fails when unordered" <|
             \() ->
                 """module A exposing (..)
 {-| A
