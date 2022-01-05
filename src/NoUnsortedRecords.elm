@@ -2646,15 +2646,19 @@ searchOrders context hasAllFields fields =
                 -- Record was not generic but extra fields were present, so it wasn't a match
                 acc
     in
-    Dict.foldl
-        (\moduleName moduleTypes outerAcc ->
-            Dict.foldl
-                (step moduleName)
-                outerAcc
-                moduleTypes
-        )
+    if List.isEmpty fields then
         { canonicalMatches = [], genericMatches = [] }
-        context.canonicalRecords
+
+    else
+        Dict.foldl
+            (\moduleName moduleTypes outerAcc ->
+                Dict.foldl
+                    (step moduleName)
+                    outerAcc
+                    moduleTypes
+            )
+            { canonicalMatches = [], genericMatches = [] }
+            context.canonicalRecords
 
 
 
@@ -3200,23 +3204,30 @@ unifyTwoTypes type1 type2 =
 
 {-| Report that an unknown record was encountered without fixes.
 -}
-unknownRecordError : Range -> Error {}
-unknownRecordError range =
-    Rule.error
-        { message = "Unknown record encountered."
-        , details =
-            [ "This record did not correspond with any known alias or custom type argument record, so whether or not its fields are sorted could not be determined!"
-            , "Create a type alias for this record type, or remove reportUnknownRecordsWithoutFix from your rule configuration."
+unknownRecordError : RecordToCheck -> Range -> List (Error {})
+unknownRecordError { fields } range =
+    case fields of
+        _ :: _ :: _ ->
+            [ Rule.error
+                { message = "Unknown record encountered."
+                , details =
+                    [ "This record did not correspond with any known alias or custom type argument record, so whether or not its fields are sorted could not be determined!"
+                    , "Create a type alias for this record type, or remove reportUnknownRecordsWithoutFix from your rule configuration."
+                    ]
+                }
+                range
             ]
-        }
-        range
+
+        _ ->
+            -- Do not report 0 or 1 field records
+            []
 
 
 {-| Report that an ambiguous record was encountered, along with a list of
 matching type aliases.
 -}
-ambiguousRecordError : List (List String) -> Range -> Error {}
-ambiguousRecordError matching range =
+ambiguousRecordError : RecordToCheck -> List (List String) -> Range -> List (Error {})
+ambiguousRecordError { fields } matching range =
     let
         prettyGeneric : List String -> String
         prettyGeneric s =
@@ -3230,12 +3241,19 @@ ambiguousRecordError matching range =
                 x :: xs ->
                     x ++ " (" ++ prettyGeneric xs ++ ")"
     in
-    Rule.error
-        { message = "Ambiguous record encountered."
-        , details =
-            [ "This record could be one of several possible record aliases, so whether or not its fields are sorted could not be determined!"
-            , "Try adding a type annotation, or remove reportAmbiguousRecordsWithoutFix from your rule configuration."
-            , "The record matched the following possible aliases: " ++ String.join ", " (List.map prettyGeneric (List.sort matching))
+    case fields of
+        _ :: _ :: _ ->
+            [ Rule.error
+                { message = "Ambiguous record encountered."
+                , details =
+                    [ "This record could be one of several possible record aliases, so whether or not its fields are sorted could not be determined!"
+                    , "Try adding a type annotation, or remove reportAmbiguousRecordsWithoutFix from your rule configuration."
+                    , "The record matched the following possible aliases: " ++ String.join ", " (List.map prettyGeneric (List.sort matching))
+                    ]
+                }
+                range
             ]
-        }
-        range
+
+        _ ->
+            -- Do not report 0 or 1 field records
+            []
