@@ -2347,98 +2347,163 @@ recordSettersToCheckable context fullRange hasAllFields hasType =
            )
 
 
-{-| Once a record has been reduced to a standard format, check its sorting.
+{-| Given two dicts of field types, keep only fields that have identical types
+between the two.
 -}
-checkRecord : RuleConfig -> ModuleContext -> RecordToCheck -> List (Error {})
-checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context { fullRange, orderInfo, fields } =
-    if List.length fields > 1 then
-        -- Only bother sorting if there are multiple fields
-        let
-            errorRange : Range
-            errorRange =
-                let
-                    s : Location
-                    s =
-                        fullRange.start
-                in
-                -- Assume opening `{` is just the first character of the range.
-                { start = s, end = { s | column = s.column + 1 } }
+keepOnlyMatchingFieldTypes : Dict String Type -> Dict String Type -> Dict String Type
+keepOnlyMatchingFieldTypes d1 d2 =
+    Dict.merge (\_ _ acc -> acc)
+        (\field t1 t2 acc ->
+            if t1 == t2 then
+                Dict.insert field t1 acc
 
-            matchingOrders : List ( List ( ModuleName, String ), ( Dict String Int, Bool ) )
-            matchingOrders =
-                findMatchingTypes context orderInfo fields
-                    |> List.map (Tuple.mapSecond (makeOrder sortGenerics fields))
-                    |> ListX.uniqueBy (Dict.toList << Tuple.first << Tuple.second)
-                    |> List.partition (Tuple.second << Tuple.second)
-                    |> (\os ->
-                            case os of
-                                ( hasUnknown, [] ) ->
-                                    hasUnknown
+            else
+                acc
+        )
+        (\_ _ acc -> acc)
+        d1
+        d2
+        Dict.empty
 
-                                ( _, noUnknown ) ->
-                                    noUnknown
-                       )
 
-            alphabetical : Field -> Field -> Order
-            alphabetical f1 f2 =
-                compare f1.field f2.field
+{-| Once a record has been reduced to a standard format, check its sorting,
+returning a list of canonical field types, if any were found.
+-}
+checkRecord : RuleConfig -> ModuleContext -> RecordToCheck -> ( List (Error {}), Dict String Type )
+checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context ({ fullRange, orderInfo, fields } as record) =
+    let
+        errorRange : Range
+        errorRange =
+            let
+                s : Location
+                s =
+                    fullRange.start
+            in
+            -- Assume opening `{` is just the first character of the range.
+            { start = s, end = { s | column = s.column + 1 } }
 
-            fieldOrder : Dict String Int -> Field -> Field -> Order
-            fieldOrder ord f1 f2 =
-                let
-                    o : String -> Int
-                    o f =
-                        Dict.get f ord
-                            |> Maybe.withDefault -1
-                in
-                compare (o f1.field) (o f2.field)
+        matchingOrders : ( List { typeName : List ( ModuleName, String ), fieldOrder : Dict String Int, hasUnknownFields : Bool, canonicalFieldTypes : Dict String Type }, Bool )
+        matchingOrders =
+            findMatchingTypes context orderInfo fields
+                |> List.map
+                    (\( t, match ) ->
+                        makeOrder sortGenerics fields match
+                            |> (\o ->
+                                    ( Dict.toList o.fieldOrder
+                                    , { typeName = t
+                                      , fieldOrder = o.fieldOrder
+                                      , hasUnknownFields = o.hasUnknownFields
+                                      , canonicalFieldTypes = o.canonicalFieldTypes
+                                      }
+                                    )
+                               )
+                    )
+                -- Dedupe by field order
+                |> DictX.fromListDedupe
+                    (\o1 o2 ->
+                        (if o1.hasUnknownFields then
+                            -- Prefer matches without unknown fields
+                            o2
 
-            checkSortingBy : (Field -> Field -> Order) -> List (Error {})
-            checkSortingBy o =
-                checkSorting context.extractSource "Record fields" [ o ] errorRange fields
-        in
-        case ( matchingOrders, sortUnknown, sortAmbiguous ) of
-            ( [], Alphabetically, _ ) ->
-                -- Unknown record, so sort alphabetically if config says to
-                checkSortingBy alphabetical
+                         else
+                            o1
+                        )
+                            |> (\o ->
+                                    -- Keep only matching field types between duplicate orders
+                                    { o | canonicalFieldTypes = keepOnlyMatchingFieldTypes o.canonicalFieldTypes o2.canonicalFieldTypes }
+                               )
+                    )
+                |> Dict.values
+                |> List.partition .hasUnknownFields
+                |> (\os ->
+                        case os of
+                            -- Prefer matches without unknown fields
+                            ( hasUnknown, [] ) ->
+                                ( hasUnknown, True )
 
-            ( [], ReportOnly, _ ) ->
-                -- Unknown record, so report without fixes
-                [ unknownRecordError fullRange ]
+                            ( _, noUnknown ) ->
+                                ( noUnknown, False )
+                   )
 
-            ( [ ( _, ( _, True ) ) ], ReportOnly, _ ) ->
-                -- Generic with unknown fields, so only report
-                [ unknownRecordError fullRange ]
+        alphabetical : Field -> Field -> Order
+        alphabetical f1 f2 =
+            compare f1.field f2.field
 
-            ( [ ( _, ( _, True ) ) ], DoNotSort, _ ) ->
-                -- Generic with unknown fields, so do not sort at all
-                []
+        byFieldOrder : Dict String Int -> Field -> Field -> Order
+        byFieldOrder ord f1 f2 =
+            let
+                o : String -> Int
+                o f =
+                    Dict.get f ord
+                        |> Maybe.withDefault -1
+            in
+            compare (o f1.field) (o f2.field)
 
-            ( [ ( _, ( o, _ ) ) ], _, _ ) ->
-                -- Unambiguous record, or generic with unknown but we want to sort alphabetically (already done in field order)
-                checkSortingBy <| fieldOrder o
+        checkSortingBy : (Field -> Field -> Order) -> List (Error {})
+        checkSortingBy o =
+            checkSorting context.extractSource "Record fields" [ o ] errorRange fields
 
-            ( _ :: _, _, Alphabetically ) ->
-                -- Ambiguous record, so sort alphabetically if config says to
-                checkSortingBy alphabetical
+        handleUnknown : (Field -> Field -> Order) -> List (Error {})
+        handleUnknown whenAlphabetical =
+            case sortUnknown of
+                Alphabetically ->
+                    -- Unknown record, so sort alphabetically if config says to
+                    checkSortingBy whenAlphabetical
 
-            ( _ :: _, _, ReportOnly ) ->
-                -- Ambiguous record, so report without fixes
-                [ ambiguousRecordError (List.map (\( ns, _ ) -> List.map (\( m, n ) -> String.join "." <| m ++ [ n ]) ns) matchingOrders) fullRange ]
+                ReportOnly ->
+                    -- Unknown record, so report without fixes
+                    unknownRecordError record fullRange
 
-            _ ->
-                []
+                DoNotSort ->
+                    -- Unknown record; don't sort it
+                    []
+    in
+    case matchingOrders of
+        ( [], _ ) ->
+            -- Completely unknown record, so no type data
+            -- Sort alphabetically if config says to
+            ( handleUnknown alphabetical, Dict.empty )
 
-    else
-        []
+        ( [ { fieldOrder, canonicalFieldTypes } ], True ) ->
+            -- Generic with unknown fields, so sort accordingly and use what type info we have
+            ( handleUnknown (byFieldOrder fieldOrder), canonicalFieldTypes )
+
+        ( [ { fieldOrder, canonicalFieldTypes } ], False ) ->
+            -- Unambiguous record
+            ( checkSortingBy <| byFieldOrder fieldOrder, canonicalFieldTypes )
+
+        ( ambiguous, _ ) ->
+            --Ambiguous record
+            let
+                unambiguousFieldTypes : Dict String Type
+                unambiguousFieldTypes =
+                    -- Keep any fields that have identical types despite the ambiguity
+                    List.foldl (\{ canonicalFieldTypes } acc -> keepOnlyMatchingFieldTypes canonicalFieldTypes acc)
+                        Dict.empty
+                        ambiguous
+            in
+            case sortAmbiguous of
+                Alphabetically ->
+                    -- Sort alphabetically if config says to
+                    ( checkSortingBy alphabetical, unambiguousFieldTypes )
+
+                ReportOnly ->
+                    -- Report without fixes if config says to
+                    ( ambiguousRecordError record (List.map (List.map (\( m, n ) -> String.join "." <| m ++ [ n ]) << .typeName) ambiguous) fullRange
+                    , unambiguousFieldTypes
+                    )
+
+                DoNotSort ->
+                    -- Do not sort if config says not to
+                    ( [], unambiguousFieldTypes )
 
 
 {-| Given how to sort generics, a list of fields to sort, and a `FieldOrder`,
-return an ordering of fields and whether or not any of them were an unknown
-record (via generics).
+return an ordering of fields, whether or not any of them were an unknown record
+(via generics), and any canonical field types.
 -}
-makeOrder : SortGenerics -> List Field -> FieldOrder -> ( Dict String Int, Bool )
-makeOrder sortGenerics =
+makeOrder : SortGenerics -> List Field -> FieldOrder -> { fieldOrder : Dict String Int, hasUnknownFields : Bool, canonicalFieldTypes : Dict String Type }
+makeOrder sortGenerics inFields (FieldOrder inOrder) =
     let
         genericOffset : Int
         genericOffset =
@@ -2499,7 +2564,10 @@ makeOrder sortGenerics =
                     )
                 |> (\( f1s, ( f2s, unknown ) ) -> ( Dict.union f1s f2s, unknown ))
     in
-    go 0
+    go 0 inFields (FieldOrder inOrder)
+        |> (\( fieldOrder, hasUnknownFields ) ->
+                { fieldOrder = fieldOrder, hasUnknownFields = hasUnknownFields, canonicalFieldTypes = Dict.map (\_ v -> Tuple.second v) inOrder.canonical }
+           )
 
 
 {-| Given context of known types, any information that would help find the
