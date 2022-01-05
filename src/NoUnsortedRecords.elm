@@ -1216,7 +1216,7 @@ checkFunctionDeclaration config local func =
             getFunctionBinding local.context func
                 |> Maybe.map Tuple.second
     in
-    Maybe.map (checkTypeAnnotation config local.context << .typeAnnotation << Node.value) func.signature
+    Maybe.map (checkTypeAnnotation config local.context Nothing << .typeAnnotation << Node.value) func.signature
         |> Maybe.withDefault []
         |> (++) (checkFunctionArgsAndExpr config local hasType arguments expression)
 
@@ -1635,36 +1635,74 @@ bindingsInPatternWithType context pattern type_ =
 
 {-| Descend into type annotations, checking for unsorted records.
 -}
-checkTypeAnnotation : RuleConfig -> ModuleContext -> Node TypeAnnotation -> List (Error {})
-checkTypeAnnotation config context type_ =
+checkTypeAnnotation : RuleConfig -> ModuleContext -> Maybe DereferencedType -> Node TypeAnnotation -> List (Error {})
+checkTypeAnnotation config context hasTypeFromParent type_ =
     let
-        go : Node TypeAnnotation -> List (Error {})
+        go : Maybe DereferencedType -> Node TypeAnnotation -> List (Error {})
         go =
             checkTypeAnnotation config context
+
+        checkFields : List ( Node String, Node TypeAnnotation ) -> ( List (Error {}), Dict String Type ) -> List (Error {})
+        checkFields fields ( parentError, canonicalTypeInfoFromParent ) =
+            parentError
+                ++ List.concatMap
+                    (\( field, a ) ->
+                        Dict.get (Node.value field) canonicalTypeInfoFromParent
+                            |> Maybe.map (dereferenceType context)
+                            |> (\t -> checkTypeAnnotation config context t a)
+                    )
+                    fields
     in
     case Node.value type_ of
         -- Records are simply records
         Record def ->
-            (recordDefToCheckable context (Node.range type_) True def
+            (recordDefToCheckable context (Node.range type_) True hasTypeFromParent def
                 |> checkRecord config context
             )
-                ++ List.concatMap (go << Tuple.second << Node.value) def
+                -- Used any found record information to check subrecords
+                |> checkFields (List.map Node.value def)
 
         GenericRecord _ def ->
-            (recordDefToCheckable context (Node.range type_) False (Node.value def)
+            (recordDefToCheckable context (Node.range type_) False hasTypeFromParent (Node.value def)
                 |> checkRecord config context
             )
-                ++ List.concatMap (go << Tuple.second << Node.value) (Node.value def)
+                -- Used any found record information to check subrecords
+                |> checkFields (List.map Node.value <| Node.value def)
 
         -- Descend into functions, tuples, and custom types
-        FunctionTypeAnnotation from to ->
-            go from ++ go to
+        FunctionTypeAnnotation fromA toA ->
+            let
+                ( fromType, toType ) =
+                    case Maybe.map getType hasTypeFromParent of
+                        Just (FunctionType { from, to }) ->
+                            ( Just <| DereferencedType from, Just <| DereferencedType to )
+
+                        _ ->
+                            ( Nothing, Nothing )
+            in
+            go fromType fromA ++ go toType toA
 
         Tupled types_ ->
-            List.concatMap go types_
+            -- Tuples must have a tuple type
+            List.map2 go (getTupleTypes types_ hasTypeFromParent) types_
+                |> List.concat
 
         Typed _ types_ ->
-            List.concatMap go types_
+            let
+                typeVars : List (Maybe DereferencedType)
+                typeVars =
+                    case Maybe.map getType hasTypeFromParent of
+                        Just (NamedType _ ts) ->
+                            List.map (Just << DereferencedType) ts
+
+                        Just (ListType t) ->
+                            [ Just <| DereferencedType t ]
+
+                        _ ->
+                            List.map (always Nothing) types_
+            in
+            List.map2 go typeVars types_
+                |> List.concat
 
         -- Generic and unit types are dead ends
         GenericType _ ->
@@ -1682,6 +1720,23 @@ checkExpression config local hasType node =
         go : Maybe DereferencedType -> Node Expression -> List (Error {})
         go =
             checkExpression config local
+
+        checkFields : Dict String DereferencedType -> List ( Node String, Node Expression ) -> ( List (Error {}), Dict String Type ) -> List (Error {})
+        checkFields typeInfo fields ( parentError, canonicalTypeInfoFromParent ) =
+            parentError
+                ++ List.concatMap
+                    (\( field, e ) ->
+                        let
+                            f : String
+                            f =
+                                Node.value field
+                        in
+                        Dict.get f canonicalTypeInfoFromParent
+                            |> Maybe.map (dereferenceType local.context)
+                            |> MaybeX.orElseLazy (\() -> Dict.get f typeInfo)
+                            |> (\t -> go t e)
+                    )
+                    fields
     in
     case Node.value node of
         -- Simple patterns simply descend into sub expressions of, unwrapping type if necessary
@@ -1767,7 +1822,8 @@ checkExpression config local hasType node =
             in
             recordSettersToCheckable local (Node.range node) True hasType recordSetters
                 |> checkRecord config local.context
-                |> (++) (List.concatMap ((\( f, e ) -> go (Dict.get (Node.value f) ts) e) << Node.value) recordSetters)
+                -- Used any found record information to check subrecords
+                |> checkFields ts (List.map Node.value recordSetters)
 
         RecordUpdateExpression _ recordSetters ->
             -- A record update must have the same type as the record, so type is useful
@@ -1785,7 +1841,8 @@ checkExpression config local hasType node =
             in
             recordSettersToCheckable local (Node.range node) False updateType recordSetters
                 |> checkRecord config local.context
-                |> (++) (List.concatMap ((\( f, e ) -> go (Dict.get (Node.value f) ts) e) << Node.value) recordSetters)
+                -- Used any found record information to check subrecords
+                |> checkFields ts (List.map Node.value recordSetters)
 
         RecordAccess e accessFunc ->
             go (makeRecordAccessType hasType <| Node.value accessFunc) e
@@ -2145,6 +2202,8 @@ checkPattern config context hasType node =
         RecordPattern fields ->
             recordPatternToCheckable (Node.range node) hasType fields
                 |> checkRecord config context
+                -- No such thing as subrecords for patterns, so we can just return the errors
+                |> Tuple.first
 
         _ ->
             -- Neither can descend into nor check:
@@ -2166,8 +2225,8 @@ This currently works around the `elm-syntax` issue with `TypeAnnotation.Record`
 ranges: <https://github.com/stil4m/elm-syntax/issues/154>
 
 -}
-recordDefToCheckable : ModuleContext -> Range -> Bool -> RecordDefinition -> RecordToCheck
-recordDefToCheckable context fullRange hasAllFields fields =
+recordDefToCheckable : ModuleContext -> Range -> Bool -> Maybe DereferencedType -> RecordDefinition -> RecordToCheck
+recordDefToCheckable context fullRange hasAllFields hasTypeFromParent fields =
     let
         makeType : Node TypeAnnotation -> Maybe DereferencedType
         makeType =
@@ -2177,6 +2236,18 @@ recordDefToCheckable context fullRange hasAllFields fields =
                 }
                 >> dereferenceType context
                 >> Just
+
+        orderInfo : Maybe OrderInfo
+        orderInfo =
+            Maybe.andThen (Result.toMaybe << makeFieldOrder) hasTypeFromParent
+                |> Maybe.map HasFieldOrder
+                |> MaybeX.orElse
+                    (if hasAllFields then
+                        Just HasAllFields
+
+                     else
+                        Nothing
+                    )
     in
     (if hasAllFields then
         -- Not a generic record, so the ranges need fixing
@@ -2216,12 +2287,7 @@ recordDefToCheckable context fullRange hasAllFields fields =
     )
         |> (\fs ->
                 { fullRange = fullRange
-                , orderInfo =
-                    if hasAllFields then
-                        Just HasAllFields
-
-                    else
-                        Nothing
+                , orderInfo = orderInfo
                 , fields = fs
                 }
            )
