@@ -92,6 +92,18 @@ a = { c = 3, b = 2, a = 1 }
                         )
                     |> Review.Test.expectErrors
                         [ unknownRecordError "{ c = 3, b = 2, a = 1 }" ]
+        , test "does not report unknown record with single field even with option" <|
+            \() ->
+                """module A exposing (..)
+
+a = { c = 3 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportUnknownRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         ]
 
 
@@ -171,6 +183,24 @@ a = { b = 2, a = 1, c = 3 }
                             |> rule
                         )
                     |> Review.Test.expectErrors [ ambiguousRecordError [ "A.A", "A.B" ] "{ b = 2, a = 1, c = 3 }" ]
+        , test "does not report ambiguous records with a single field even with option" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { b : Int, c : Int, a : Int }
+type alias B = { c : Int, a : Int, b : Int }
+
+a r =
+    case r of
+        { b } ->
+            True
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         ]
 
 
