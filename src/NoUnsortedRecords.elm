@@ -1579,7 +1579,7 @@ bindingsInPatternWithType context pattern type_ =
 
         TuplePattern ps ->
             getTupleTypes ps type_
-                |> (\ts -> List.map2 go ps ts)
+                |> List.map2 go ps
                 |> List.concat
 
         RecordPattern ps ->
