@@ -28,6 +28,7 @@ all =
         [ passes
         , orderings
         , glues
+        , docCommentDetectionTests
         ]
 
 
@@ -2441,6 +2442,277 @@ help =
 
 y =
     help
+"""
+                        ]
+        ]
+
+
+docCommentDetectionTests : Test
+docCommentDetectionTests =
+    describe "correctly attaches doc comments"
+        [ test "when before imports" <|
+            \() ->
+                """port module A exposing (..)
+
+{-| before import
+-}
+
+import Dict
+
+port z : () -> Int
+
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+{-| before import
+-}
+
+import Dict
+
+a = 1
+
+port z : () -> Int
+"""
+                        ]
+        , test "when after imports" <|
+            \() ->
+                """port module A exposing (..)
+
+import Dict
+
+{-| after import
+-}
+port z : () -> Int
+
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+import Dict
+
+a = 1
+
+{-| after import
+-}
+port z : () -> Int
+"""
+                        ]
+        , test "no import, but two before" <|
+            \() ->
+                """port module A exposing (..)
+
+{-| doc1
+-}
+
+{-| doc2
+-}
+port z : () -> Int
+
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+{-| doc1
+-}
+
+a = 1
+
+{-| doc2
+-}
+port z : () -> Int
+"""
+                        ]
+        , test "no import, but parsed doc commment" <|
+            \() ->
+                """port module A exposing (..)
+
+{-| doc1
+-}
+
+{-| doc2
+-}
+a = 1
+
+port z : () -> Int
+
+b = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+{-| doc1
+-}
+
+{-| doc2
+-}
+a = 1
+
+b = 1
+
+port z : () -> Int
+"""
+                        ]
+        , test "no import, but @docs in comment" <|
+            \() ->
+                """port module A exposing (..)
+
+{-|
+
+## Expose
+
+@docs a, b
+
+-}
+
+port z : () -> Int
+
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+{-|
+
+## Expose
+
+@docs a, b
+
+-}
+
+a = 1
+
+port z : () -> Int
+"""
+                        ]
+        , test "no import, no @docs in comment, so assume it's for port" <|
+            \() ->
+                """port module A exposing (..)
+
+{-| nothing
+-}
+port z : () -> Int
+
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+a = 1
+
+{-| nothing
+-}
+port z : () -> Int
+"""
+                        ]
+        , test "multiple ports etc" <|
+            \() ->
+                """port module A exposing (..)
+
+{-| module
+-}
+
+{-| z
+-}
+port z : () -> Int
+
+{-| G
+-}
+type G = G
+
+{-| b
+-}
+b = 1
+
+port s : () -> Int
+
+{-| f
+-}
+port f : () -> Int
+
+{-| a
+-}
+a = 1
+"""
+                    |> Review.Test.run
+                        (sortTopLevelDeclarations
+                            |> alphabetically
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError True
+                            |> Review.Test.whenFixed
+                                """port module A exposing (..)
+
+{-| module
+-}
+
+{-| a
+-}
+a = 1
+
+{-| b
+-}
+b = 1
+
+{-| f
+-}
+port f : () -> Int
+
+{-| G
+-}
+type G = G
+
+port s : () -> Int
+
+{-| z
+-}
+port z : () -> Int
 """
                         ]
         ]
