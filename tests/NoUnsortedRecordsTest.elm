@@ -104,6 +104,18 @@ a = { c = 3 }
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "does not report unit record even with option" <|
+            \() ->
+                """module A exposing (..)
+
+a = {}
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportUnknownRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         ]
 
 
