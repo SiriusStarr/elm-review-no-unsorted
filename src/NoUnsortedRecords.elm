@@ -1,6 +1,10 @@
 module NoUnsortedRecords exposing
     ( rule
-    , RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix, treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+    , RuleConfig, defaults
+    , sortGenericFieldsLast
+    , doNotSortAmbiguousRecords, reportAmbiguousRecordsWithoutFix
+    , doNotSortUnknownRecords, reportUnknownRecordsWithoutFix
+    , treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
     )
 
 {-|
@@ -13,7 +17,35 @@ module NoUnsortedRecords exposing
 
 ## Configuration
 
-@docs RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix, treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+@docs RuleConfig, defaults
+
+
+### Sorting
+
+@docs sortGenericFieldsLast
+
+
+### Ambiguous Records
+
+An ambiguous record is a record that matches more than one known "canonical"
+record.
+
+@docs doNotSortAmbiguousRecords, reportAmbiguousRecordsWithoutFix
+
+
+### Unknown Records
+
+An unknown record is a record that does not match any known "canonical" records.
+
+@docs doNotSortUnknownRecords, reportUnknownRecordsWithoutFix
+
+
+### Subrecords
+
+Subrecords are records that are either within the fields of a type alias or are
+arguments of a custom type.
+
+@docs treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
 
 -}
 
