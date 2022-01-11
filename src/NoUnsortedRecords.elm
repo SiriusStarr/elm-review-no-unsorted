@@ -5,6 +5,7 @@ module NoUnsortedRecords exposing
     , doNotSortAmbiguousRecords, reportAmbiguousRecordsWithoutFix
     , doNotSortUnknownRecords, reportUnknownRecordsWithoutFix
     , treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+    , typecheckAllRecords
     )
 
 {-|
@@ -46,6 +47,11 @@ Subrecords are records that are either within the fields of a type alias or are
 arguments of a custom type.
 
 @docs treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+
+
+### Other Settings
+
+@docs typecheckAllRecords
 
 -}
 
@@ -340,6 +346,7 @@ type RuleConfig
         , sortAmbiguous : SortWithoutCanonicalOrder
         , sortGenerics : SortGenerics
         , subrecordTreatment : SubrecordCanonicity
+        , typecheckUnambiguousRecords : Bool
         }
 
 
@@ -383,6 +390,12 @@ type SortWithoutCanonicalOrder
   - Generic fields of generic records are sorted before the canonical ones.
   - Subrecords are treated as having canonical order only when associated with
     their outer record/constructor.
+  - Typechecking is only used to disambiguate records, i.e. a record will not
+    _not_ match a canonical record just because the rule thinks it has the wrong
+    type. For instance, `{ foo = 1, bar = 2 }` will match
+    `{ foo : String, bar : String }` if no other records exist with the fields
+    `foo` and `bar`. This is to protect against incorrect type inference by this
+    rule.
 
 Use `reportUnknownRecordsWithoutFix`, etc. to alter this behavior, e.g.
 
@@ -401,7 +414,20 @@ defaults =
         , sortAmbiguous = Alphabetically
         , sortGenerics = GenericFieldsFirst
         , subrecordTreatment = CanonicalWhenSubrecord
+        , typecheckUnambiguousRecords = False
         }
+
+
+{-| By default, typechecking is only used to disambiguate records. This alters
+that behavior to typecheck _all_ records. For instance, this will force
+`{ foo = 1, bar = 2 }` to be an "unknown" record if
+`{ foo : String, bar : String }` is known. This should probably be left turned
+off, unless you wish to help find examples of incorrect type inference by this
+rule.
+-}
+typecheckAllRecords : RuleConfig -> RuleConfig
+typecheckAllRecords (RuleConfig r) =
+    RuleConfig { r | typecheckUnambiguousRecords = True }
 
 
 {-| By default, anonymous records within known records and within custom type
