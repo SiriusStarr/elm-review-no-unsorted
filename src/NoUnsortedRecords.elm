@@ -288,7 +288,7 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example --rules NoUnsor
 rule : RuleConfig -> Rule
 rule config =
     Rule.newProjectRuleSchema "NoUnsortedRecords" initialProjectContext
-        |> Rule.withDependenciesProjectVisitor (\d c -> ( [], dependencyVisitor c d ))
+        |> Rule.withDependenciesProjectVisitor (\d c -> ( [], dependencyVisitor config c d ))
         |> Rule.withModuleVisitor (moduleVisitor config)
         |> Rule.withModuleContextUsingContextCreator
             { fromProjectToModule = fromProjectToModule
@@ -490,6 +490,7 @@ sortGenericFieldsLast (RuleConfig r) =
 type alias KnownRecord =
     { order : Dict String ( Int, Type )
     , isGeneric : Bool
+    , isSubrecord : Bool
     }
 
 
@@ -635,7 +636,7 @@ moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema r ModuleContext -> Rule.Modu
 moduleVisitor config schema =
     schema
         |> Rule.withModuleDefinitionVisitor (\m context -> ( [], { context | exposingList = Just <| exposingList <| Node.value m } ))
-        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor c ds ))
+        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config c ds ))
         |> Rule.withDeclarationEnterVisitor (\d c -> ( declarationEnterVisitor config c d, c ))
 
 
@@ -773,10 +774,42 @@ foldProjectContexts newContext prevContext =
     }
 
 
+{-| Return whether or not subrecords should be considered canonical, for
+creating the type of a full record.
+-}
+subrecordCanonicityForRecord : SubrecordCanonicity -> Maybe Bool
+subrecordCanonicityForRecord subrecordTreatment =
+    case subrecordTreatment of
+        CanonicalWhenSubrecord ->
+            Just True
+
+        AlwaysUnknown ->
+            Just False
+
+        AlwaysCanonical ->
+            Just True
+
+
+{-| Return whether or not subrecords should be considered canonical, for
+creating the type of a field or argument.
+-}
+subrecordCanonicityForField : SubrecordCanonicity -> Maybe Bool
+subrecordCanonicityForField subrecordTreatment =
+    case subrecordTreatment of
+        CanonicalWhenSubrecord ->
+            Just True
+
+        AlwaysUnknown ->
+            Nothing
+
+        AlwaysCanonical ->
+            Just True
+
+
 {-| Visit all dependencies and store type order from them.
 -}
-dependencyVisitor : ProjectContext -> Dict String Dependency -> ProjectContext
-dependencyVisitor =
+dependencyVisitor : RuleConfig -> ProjectContext -> Dict String Dependency -> ProjectContext
+dependencyVisitor (RuleConfig { subrecordTreatment }) =
     let
         step : Elm.Docs.Module -> ProjectContext -> ProjectContext
         step ({ aliases, binops, unions, values } as mod) acc =
@@ -785,24 +818,8 @@ dependencyVisitor =
                 recordFromTypeAlias { name, args, tipe } =
                     case tipe of
                         Elm.Type.Record fields Nothing ->
-                            ( [ ( name
-                                , ListX.indexedFoldl
-                                    (\i ( f, t ) ->
-                                        Dict.insert f
-                                            ( i
-                                            , docTypeToType moduleName
-                                                -- Constrained type vars don't apply to type aliases
-                                                { constrainedTypeVarsAreRespected = False
-                                                , recordIsCanonical = True
-                                                }
-                                                t
-                                            )
-                                    )
-                                    Dict.empty
-                                    fields
-                                    |> (\order -> { order = order, isGeneric = False })
-                                )
-                              ]
+                            ( knownRecordFromDocType subrecordTreatment moduleName ( fields, False )
+                                |> List.map (Tuple.mapFirst (\s -> name ++ s))
                             , [ ( name
                                 , { customTypeName = Nothing
                                   , type_ =
@@ -811,7 +828,9 @@ dependencyVisitor =
                                                 >> docTypeToTypeWithPositionalVars moduleName
                                                     -- Constrained type vars do apply to record constructors
                                                     { constrainedTypeVarsAreRespected = True
-                                                    , recordIsCanonical = True
+
+                                                    -- Arguments only have order if config says so
+                                                    , subrecordIsAlsoCanonical = subrecordCanonicityForField subrecordTreatment
                                                     }
                                                     args
                                             )
@@ -819,7 +838,9 @@ dependencyVisitor =
                                             |> makeFunctionTypeWithPositionalVars
                                                 (docTypeToTypeWithPositionalVars moduleName
                                                     { constrainedTypeVarsAreRespected = True
-                                                    , recordIsCanonical = True
+
+                                                    -- Return type *does* have order
+                                                    , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
                                                     }
                                                     args
                                                     tipe
@@ -830,24 +851,8 @@ dependencyVisitor =
                             )
 
                         Elm.Type.Record fields (Just _) ->
-                            ( [ ( name
-                                , ListX.indexedFoldl
-                                    (\i ( f, t ) ->
-                                        Dict.insert f
-                                            ( i
-                                            , docTypeToType moduleName
-                                                -- Constrained type vars don't apply to type aliases
-                                                { constrainedTypeVarsAreRespected = False
-                                                , recordIsCanonical = True
-                                                }
-                                                t
-                                            )
-                                    )
-                                    Dict.empty
-                                    fields
-                                    |> (\order -> { order = order, isGeneric = True })
-                                )
-                              ]
+                            ( knownRecordFromDocType subrecordTreatment moduleName ( fields, True )
+                                |> List.map (Tuple.mapFirst (\s -> name ++ s))
                             , -- No constructors for generic records
                               []
                             )
@@ -861,47 +866,61 @@ dependencyVisitor =
                     , docTypeToTypeWithPositionalVars moduleName
                         -- Constrained type vars aren't respected for type aliases
                         { constrainedTypeVarsAreRespected = False
-                        , recordIsCanonical = True
+                        , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
                         }
                         args
                         tipe
                     )
 
-                makeConstructor : TypeWithPositionalVars -> List String -> ( String, List Elm.Type.Type ) -> ( String, TypeWithPositionalVars )
+                makeConstructor : TypeWithPositionalVars -> List String -> ( String, List Elm.Type.Type ) -> ( String, TypeWithPositionalVars, List ( String, KnownRecord ) )
                 makeConstructor return typeVars ( name, arguments ) =
-                    ( name
-                    , List.map
+                    List.map
                         (docTypeToTypeWithPositionalVars moduleName
                             { constrainedTypeVarsAreRespected = True
-                            , recordIsCanonical = True
+
+                            -- Arguments only have order if config says so
+                            , subrecordIsAlsoCanonical =
+                                subrecordCanonicityForField subrecordTreatment
                             }
                             typeVars
                         )
                         arguments
-                        |> makeFunctionTypeWithPositionalVars return
-                    )
+                        |> (\ts ->
+                                ( name
+                                , makeFunctionTypeWithPositionalVars return ts
+                                , List.indexedMap (\i t -> makeSubrecordsFromType (name ++ " arg" ++ String.fromInt i) <| getTypeWithPositionalVars t) ts
+                                    |> List.concat
+                                )
+                           )
 
-                functionsFromCustomType : Elm.Docs.Union -> List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
+                functionsFromCustomType : Elm.Docs.Union -> ( List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } ), List ( String, KnownRecord ) )
                 functionsFromCustomType { name, args, tags } =
-                    List.map
-                        (makeConstructor
-                            (List.map (TypeVar Nothing) args
-                                |> NamedType ( moduleName, name )
-                                |> DereferencedType
-                                |> assignTypeVars (makePositionalArgTypeVars args)
-                                |> getType
-                                |> TypeWithPositionalVars
-                            )
-                            args
-                            >> Tuple.mapSecond (\type_ -> { customTypeName = Just name, type_ = type_ })
+                    List.foldl
+                        (\t ( fAcc, rAcc ) ->
+                            makeConstructor
+                                (List.map (TypeVar Nothing) args
+                                    |> NamedType ( moduleName, name )
+                                    |> DereferencedType
+                                    |> assignTypeVars (makePositionalArgTypeVars args)
+                                    |> getType
+                                    |> TypeWithPositionalVars
+                                )
+                                args
+                                t
+                                |> (\( n, type_, rs ) ->
+                                        ( ( n, { customTypeName = Just name, type_ = type_ } ) :: fAcc
+                                        , rs ++ rAcc
+                                        )
+                                   )
                         )
+                        ( [], [] )
                         tags
 
                 functionFromValue : Elm.Docs.Value -> ( String, Type )
                 functionFromValue { name, tipe } =
                     docTypeToType moduleName
                         { constrainedTypeVarsAreRespected = True
-                        , recordIsCanonical = False
+                        , subrecordIsAlsoCanonical = Nothing
                         }
                         tipe
                         |> Tuple.pair name
@@ -910,7 +929,7 @@ dependencyVisitor =
                 functionFromOperator { name, tipe } =
                     docTypeToType moduleName
                         { constrainedTypeVarsAreRespected = True
-                        , recordIsCanonical = False
+                        , subrecordIsAlsoCanonical = Nothing
                         }
                         tipe
                         |> Tuple.pair name
@@ -926,19 +945,30 @@ dependencyVisitor =
                         |> Maybe.map Dict.fromList
                         |> Maybe.map (Tuple.pair moduleName)
 
-                ( newRecords, newRecordConstructors ) =
+                ( newAliasRecords, newRecordConstructors ) =
                     List.map recordFromTypeAlias aliases
                         |> List.unzip
                         |> Tuple.mapBoth (Dict.fromList << List.concat) (Dict.fromList << List.concat)
-                        |> Tuple.mapFirst (Maybe.map (Tuple.pair moduleName) << validate (not << Dict.isEmpty))
 
-                newConstructors : Maybe ( ModuleName, Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
-                newConstructors =
-                    List.concatMap functionsFromCustomType unions
-                        |> Dict.fromList
-                        |> Dict.union newRecordConstructors
-                        |> validate (not << Dict.isEmpty)
-                        |> Maybe.map (Tuple.pair moduleName)
+                ( newConstructors, newRecords ) =
+                    List.foldl
+                        (\u ( fAcc, rAcc ) ->
+                            functionsFromCustomType u
+                                |> (\( fs, rs ) -> ( fs ++ fAcc, rs ++ rAcc ))
+                        )
+                        ( [], [] )
+                        unions
+                        |> Tuple.mapBoth
+                            (Dict.fromList
+                                >> Dict.union newRecordConstructors
+                                >> validate (not << Dict.isEmpty)
+                                >> Maybe.map (Tuple.pair moduleName)
+                            )
+                            (Dict.fromList
+                                >> Dict.union newAliasRecords
+                                >> validate (not << Dict.isEmpty)
+                                >> Maybe.map (Tuple.pair moduleName)
+                            )
 
                 newOperators : Dict String Type
                 newOperators =
@@ -975,11 +1005,12 @@ dependencyVisitor =
         )
 
 
-{-| Given the current module name, whether or not record orders are canonical,
-and a dict of positional type vars, convert an `Elm.Type.Type` to a
+{-| Given the current module name, whether or not a top-level record type (if
+`Just`) and subrecords (if `Just True`) found are in canonical order, and a dict
+of positional type vars, convert an `Elm.Type.Type` to a
 `TypeWithPositionalVars`.
 -}
-docTypeToTypeWithPositionalVars : ModuleName -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> List String -> Elm.Type.Type -> TypeWithPositionalVars
+docTypeToTypeWithPositionalVars : ModuleName -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> List String -> Elm.Type.Type -> TypeWithPositionalVars
 docTypeToTypeWithPositionalVars currentModule settings typeArgs =
     docTypeToType currentModule settings
         >> DereferencedType
@@ -988,15 +1019,103 @@ docTypeToTypeWithPositionalVars currentModule settings typeArgs =
         >> TypeWithPositionalVars
 
 
-{-| Given the current module name and whether or not record orders are
-canonical, convert an `Elm.Type.Type` to a `Type`.
+{-| Given how to treat subrecords, the current module names, and a list of
+fields/whether the record is generic, generate all `KnownRecord`s from a
+`Elm.Type.Type`.
 -}
-docTypeToType : ModuleName -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Elm.Type.Type -> Type
-docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) type_ =
+knownRecordFromDocType : SubrecordCanonicity -> ModuleName -> ( List ( String, Elm.Type.Type ), Bool ) -> List ( String, KnownRecord )
+knownRecordFromDocType subrecordTreatment currentModule ( fields, isGeneric ) =
+    ListX.indexedFoldl
+        (\i ( f, t ) ->
+            Dict.insert f
+                ( i
+                , docTypeToType currentModule
+                    { -- Constrained type vars don't apply to type aliases
+                      constrainedTypeVarsAreRespected = False
+
+                    -- Subrecords canonical if config says so
+                    , subrecordIsAlsoCanonical = subrecordCanonicityForField subrecordTreatment
+                    }
+                    t
+                )
+        )
+        Dict.empty
+        fields
+        |> (\order ->
+                { order = order
+                , isGeneric = isGeneric
+                , isSubrecord = False
+                }
+           )
+        |> (\k ->
+                if subrecordTreatment == AlwaysCanonical then
+                    ( "", k )
+                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType ("." ++ f) t) (Dict.toList k.order)
+
+                else
+                    -- Only create the top level record
+                    [ ( "", k ) ]
+           )
+
+
+{-| Given a name prefix and a type, generate `KnownRecord`s for all records in
+that type.
+-}
+makeSubrecordsFromType : String -> Type -> List ( String, KnownRecord )
+makeSubrecordsFromType namePrefix type_ =
+    let
+        go : Maybe String -> Type -> List ( String, KnownRecord )
+        go s =
+            makeSubrecordsFromType (MaybeX.unwrap namePrefix ((++) namePrefix) s)
+    in
+    case type_ of
+        FunctionType { from, to } ->
+            go Nothing from ++ go Nothing to
+
+        TupleType ts ->
+            List.concatMap (go Nothing) ts
+
+        ListType t_ ->
+            go Nothing t_
+
+        RecordType { fields, generic } ->
+            ( namePrefix
+            , { order =
+                    ListX.indexedFoldl
+                        (\i ( f, t ) ->
+                            Dict.insert f
+                                ( i
+                                , t
+                                )
+                        )
+                        Dict.empty
+                        fields
+              , isGeneric = generic /= Nothing
+              , isSubrecord = True
+              }
+            )
+                :: List.concatMap (\( f, t ) -> go (Just <| "." ++ f) t) fields
+
+        _ ->
+            -- UnitType
+            -- TypeVar
+            -- NamedType
+            []
+
+
+{-| Given the current module name and whether or not a top-level record type (if
+`Just`) and subrecords (if `Just True`) found are in canonical order, convert an
+`Elm.Type.Type` to a `Type`.
+-}
+docTypeToType : ModuleName -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> Elm.Type.Type -> Type
+docTypeToType currentModule ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanonical } as settings) type_ =
     let
         go : Elm.Type.Type -> Type
         go =
-            docTypeToType currentModule settings
+            MaybeX.filter identity subrecordIsAlsoCanonical
+                |> (\subrecordStillCanon ->
+                        docTypeToType currentModule { settings | subrecordIsAlsoCanonical = subrecordStillCanon }
+                   )
 
         makeList : ModuleName -> String -> List Elm.Type.Type -> Maybe Type
         makeList mod name args =
@@ -1039,7 +1158,7 @@ docTypeToType currentModule ({ constrainedTypeVarsAreRespected, recordIsCanonica
                     -- `type alias G comparable = { comparable | x : Int }`
                     -- is just a normal generic record.
                     Maybe.map (TypeVar Nothing) generic
-                , canonical = recordIsCanonical
+                , canonical = subrecordIsAlsoCanonical /= Nothing
                 , fields = List.map (Tuple.mapSecond go) fields
                 }
 
@@ -1071,151 +1190,156 @@ makeTypeVar constrainedTypeVarsAreRespected s =
         |> (\t -> TypeVar t s)
 
 
+{-| Convert a type annotation into a record definition (and whether or not the
+record is generic) if it is one.
+-}
+annotToFields : Node TypeAnnotation -> Maybe ( RecordDefinition, Bool )
+annotToFields annot =
+    case Node.value annot of
+        TypeAnnotation.Record fields ->
+            Just ( fields, False )
+
+        GenericRecord _ fields ->
+            Just ( Node.value fields, True )
+
+        _ ->
+            Nothing
+
+
+{-| Unwrap a type alias from a declaration (if it is one).
+-}
+getAlias : Node Declaration -> Maybe TypeAlias
+getAlias node =
+    case Node.value node of
+        AliasDeclaration alias_ ->
+            Just alias_
+
+        _ ->
+            Nothing
+
+
 {-| Visit declarations, storing record field orders.
 -}
-declarationListVisitor : ModuleContext -> List (Node Declaration) -> ModuleContext
-declarationListVisitor context declarations =
+declarationListVisitor : RuleConfig -> ModuleContext -> List (Node Declaration) -> ModuleContext
+declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations =
     let
-        getAlias : Node Declaration -> Maybe TypeAlias
-        getAlias node =
-            case Node.value node of
-                AliasDeclaration alias_ ->
-                    Just alias_
-
-                _ ->
-                    Nothing
-
-        annotToFields : Node TypeAnnotation -> Maybe ( RecordDefinition, Bool )
-        annotToFields annot =
-            case Node.value annot of
-                TypeAnnotation.Record fields ->
-                    Just ( fields, False )
-
-                GenericRecord _ fields ->
-                    Just ( Node.value fields, True )
-
-                _ ->
-                    Nothing
-
-        recordFromTypeAlias : TypeAlias -> Maybe ( String, KnownRecord )
-        recordFromTypeAlias { name, typeAnnotation } =
-            annotToFields typeAnnotation
-                |> Maybe.map
-                    (\( fields, isGeneric ) ->
-                        ListX.indexedFoldl
-                            (\i field ->
-                                let
-                                    ( f, t ) =
-                                        Node.value field
-                                in
-                                Dict.insert
-                                    (Node.value f)
-                                    ( i
-                                    , typeAnnotToType context
-                                        -- Constrained type vars are not respected for aliases
-                                        { constrainedTypeVarsAreRespected = False
-                                        , recordIsCanonical = True
-                                        }
-                                        t
-                                    )
-                            )
-                            Dict.empty
-                            fields
-                            |> (\order -> { order = order, isGeneric = isGeneric })
-                    )
-                |> Maybe.map (Tuple.pair <| Node.value name)
-
         makeAliasInfo : TypeAlias -> ( String, TypeWithPositionalVars )
         makeAliasInfo { name, generics, typeAnnotation } =
             ( Node.value name
             , typeAnnotToTypeWithPositionalVars context
                 -- Constrained type vars are not respected for aliases
                 { constrainedTypeVarsAreRespected = False
-                , recordIsCanonical = True
+                , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
                 }
                 (List.map Node.value generics)
                 typeAnnotation
             )
 
-        makeConstructor : TypeWithPositionalVars -> List (Node String) -> ValueConstructor -> ( String, TypeWithPositionalVars )
-        makeConstructor return typeVars { name, arguments } =
-            ( Node.value name
-            , List.map
+        makeConstructorAndSubrecords : TypeWithPositionalVars -> List (Node String) -> ValueConstructor -> ( String, TypeWithPositionalVars, List ( String, KnownRecord ) )
+        makeConstructorAndSubrecords return typeVars { name, arguments } =
+            List.map
                 (typeAnnotToTypeWithPositionalVars context
                     { constrainedTypeVarsAreRespected = True
-                    , recordIsCanonical = True
+                    , subrecordIsAlsoCanonical = subrecordCanonicityForField subrecordTreatment
                     }
                     (List.map Node.value typeVars)
                 )
                 arguments
-                |> makeFunctionTypeWithPositionalVars return
-            )
+                |> (\ts ->
+                        let
+                            n : String
+                            n =
+                                Node.value name
+                        in
+                        ( n
+                        , makeFunctionTypeWithPositionalVars return ts
+                        , List.indexedMap (\i t -> makeSubrecordsFromType (n ++ " arg" ++ String.fromInt i) <| getTypeWithPositionalVars t) ts
+                            |> List.concat
+                        )
+                   )
 
-        getConstructorsFromDeclaration : Node Declaration -> List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
-        getConstructorsFromDeclaration node =
+        getConstructorsAndRecordsFromDeclaration : Node Declaration -> ( List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } ), List ( String, KnownRecord ) )
+        getConstructorsAndRecordsFromDeclaration node =
             case Node.value node of
                 CustomTypeDeclaration { name, generics, constructors } ->
-                    List.map
-                        (Node.value
-                            >> makeConstructor
-                                (List.map Node.value generics
-                                    |> (\gs ->
-                                            List.map (TypeVar Nothing) gs
-                                                |> NamedType ( [], Node.value name )
-                                                |> DereferencedType
-                                                |> assignTypeVars (makePositionalArgTypeVars gs)
-                                                |> getType
-                                                |> TypeWithPositionalVars
-                                       )
-                                )
-                                generics
-                            >> Tuple.mapSecond
-                                (\type_ ->
-                                    { customTypeName = Just <| Node.value name
-                                    , type_ = type_
-                                    }
-                                )
+                    List.foldl
+                        (\c ( fAcc, rAcc ) ->
+                            Node.value c
+                                |> makeConstructorAndSubrecords
+                                    (List.map Node.value generics
+                                        |> (\gs ->
+                                                List.map (TypeVar Nothing) gs
+                                                    |> NamedType ( [], Node.value name )
+                                                    |> DereferencedType
+                                                    |> assignTypeVars (makePositionalArgTypeVars gs)
+                                                    |> getType
+                                                    |> TypeWithPositionalVars
+                                           )
+                                    )
+                                    generics
+                                |> (\( n, type_, rs ) ->
+                                        ( ( n
+                                          , { customTypeName = Just <| Node.value name
+                                            , type_ = type_
+                                            }
+                                          )
+                                            :: fAcc
+                                        , rs ++ rAcc
+                                        )
+                                   )
                         )
+                        ( [], [] )
                         constructors
 
                 AliasDeclaration { name, generics, typeAnnotation } ->
                     annotToFields typeAnnotation
-                        -- Generic records do not have constructors.
-                        |> MaybeX.filter (not << Tuple.second)
                         |> Maybe.map
-                            (\( fields, _ ) ->
-                                [ ( Node.value name
-                                  , { customTypeName = Nothing
-                                    , type_ =
-                                        List.map Node.value generics
-                                            |> (\vars ->
-                                                    List.map
-                                                        (Node.value
-                                                            >> Tuple.second
-                                                            >> typeAnnotToTypeWithPositionalVars context
-                                                                { constrainedTypeVarsAreRespected = True
-                                                                , recordIsCanonical = True
-                                                                }
-                                                                vars
-                                                        )
-                                                        fields
-                                                        |> makeFunctionTypeWithPositionalVars
-                                                            (typeAnnotToTypeWithPositionalVars context
-                                                                { constrainedTypeVarsAreRespected = True
-                                                                , recordIsCanonical = True
-                                                                }
-                                                                vars
-                                                                typeAnnotation
+                            (\( fields, isGeneric ) ->
+                                let
+                                    n : String
+                                    n =
+                                        Node.value name
+                                in
+                                ( -- Generic records do not have constructors.
+                                  if isGeneric then
+                                    []
+
+                                  else
+                                    [ ( n
+                                      , { customTypeName = Nothing
+                                        , type_ =
+                                            List.map Node.value generics
+                                                |> (\vars ->
+                                                        List.map
+                                                            (Node.value
+                                                                >> Tuple.second
+                                                                >> typeAnnotToTypeWithPositionalVars context
+                                                                    { constrainedTypeVarsAreRespected = True
+                                                                    , subrecordIsAlsoCanonical = subrecordCanonicityForField subrecordTreatment
+                                                                    }
+                                                                    vars
                                                             )
-                                               )
-                                    }
-                                  )
-                                ]
+                                                            fields
+                                                            |> makeFunctionTypeWithPositionalVars
+                                                                (typeAnnotToTypeWithPositionalVars context
+                                                                    { constrainedTypeVarsAreRespected = True
+                                                                    , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
+                                                                    }
+                                                                    vars
+                                                                    typeAnnotation
+                                                                )
+                                                   )
+                                        }
+                                      )
+                                    ]
+                                , knownRecordFromTypeAnnot subrecordTreatment context ( fields, isGeneric )
+                                    |> List.map (Tuple.mapFirst (\s -> n ++ s))
+                                )
                             )
-                        |> Maybe.withDefault []
+                        |> Maybe.withDefault ( [], [] )
 
                 _ ->
-                    []
+                    ( [], [] )
 
         getFunctionsFromDeclaration : Node Declaration -> Maybe ( String, Type )
         getFunctionsFromDeclaration node =
@@ -1225,16 +1349,21 @@ declarationListVisitor context declarations =
                         |> Maybe.map
                             (\{ name, typeAnnotation } ->
                                 -- Function declarations do not have canonical record orders nor do they have type variables (that might be made concrete)
-                                typeAnnotToType context
-                                    { constrainedTypeVarsAreRespected = True
-                                    , recordIsCanonical = False
-                                    }
-                                    typeAnnotation
+                                typeAnnotToNoncanonicalType context typeAnnotation
                                     |> Tuple.pair (Node.value name)
                             )
 
                 _ ->
                     Nothing
+
+        ( newConstructors, newRecords ) =
+            List.foldl
+                (\d ( fAcc, rAcc ) ->
+                    getConstructorsAndRecordsFromDeclaration d
+                        |> (\( fs, rs ) -> ( fs ++ fAcc, rs ++ rAcc ))
+                )
+                ( [], [] )
+                declarations
     in
     -- Find aliases, canonical records, and function types and store them
     { context
@@ -1244,13 +1373,11 @@ declarationListVisitor context declarations =
                 |> Maybe.map Dict.fromList
                 |> MaybeX.unwrap context.aliases (\v -> Dict.insert context.currentModule v context.aliases)
         , canonicalRecords =
-            List.filterMap (Maybe.andThen recordFromTypeAlias << getAlias) declarations
-                |> validate (not << List.isEmpty)
+            validate (not << List.isEmpty) newRecords
                 |> Maybe.map Dict.fromList
                 |> MaybeX.unwrap context.canonicalRecords (\v -> Dict.insert context.currentModule v context.canonicalRecords)
         , constructors =
-            List.concatMap getConstructorsFromDeclaration declarations
-                |> validate (not << List.isEmpty)
+            validate (not << List.isEmpty) newConstructors
                 |> Maybe.map Dict.fromList
                 |> MaybeX.unwrap context.constructors (\v -> Dict.insert context.currentModule v context.constructors)
         , functionTypes =
@@ -1300,11 +1427,7 @@ getFunctionBinding context { signature } =
         |> Maybe.map
             (\{ name, typeAnnotation } ->
                 ( Node.value name
-                , typeAnnotToType context
-                    { constrainedTypeVarsAreRespected = True
-                    , recordIsCanonical = False
-                    }
-                    typeAnnotation
+                , typeAnnotToNoncanonicalType context typeAnnotation
                     |> dereferenceType context
                 )
             )
@@ -1332,11 +1455,12 @@ makeFunctionTypeWithPositionalVars return ts =
         |> TypeWithPositionalVars
 
 
-{-| Given context, whether or not record types found are in canonical order, and
-a `Dict` of positional type variables, convert a `TypeAnnotation` into a
+{-| Given context, whether or not a top-level record type (if `Just`) and
+subrecords (if `Just True`) found are in canonical order, and a `Dict` of
+positional type variables, convert a `TypeAnnotation` into a
 `TypeWithPositionalVars`.
 -}
-typeAnnotToTypeWithPositionalVars : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> List String -> Node TypeAnnotation -> TypeWithPositionalVars
+typeAnnotToTypeWithPositionalVars : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> List String -> Node TypeAnnotation -> TypeWithPositionalVars
 typeAnnotToTypeWithPositionalVars context settings typeArgs =
     typeAnnotToType context settings
         >> DereferencedType
@@ -1345,15 +1469,69 @@ typeAnnotToTypeWithPositionalVars context settings typeArgs =
         >> TypeWithPositionalVars
 
 
-{-| Given context and whether or not record types found are in canonical order,
-convert a `TypeAnnotation` into a `Type`.
+{-| Given how to treat subrecords, the current module names, and a
+`RecordDefinition`/whether the record is generic, generate all `KnownRecord`s
+from a type annotation.
 -}
-typeAnnotToType : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, recordIsCanonical : Bool } -> Node TypeAnnotation -> Type
-typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } as settings) annot =
+knownRecordFromTypeAnnot : SubrecordCanonicity -> ModuleContext -> ( RecordDefinition, Bool ) -> List ( String, KnownRecord )
+knownRecordFromTypeAnnot subrecordTreatment context ( fields, isGeneric ) =
+    ListX.indexedFoldl
+        (\i field ->
+            let
+                ( f, t ) =
+                    Node.value field
+            in
+            Dict.insert
+                (Node.value f)
+                ( i
+                , typeAnnotToType context
+                    -- Constrained type vars are not respected for aliases
+                    { constrainedTypeVarsAreRespected = False
+
+                    -- Subrecords canonical if config says so
+                    , subrecordIsAlsoCanonical =
+                        subrecordCanonicityForField subrecordTreatment
+                    }
+                    t
+                )
+        )
+        Dict.empty
+        fields
+        |> (\order -> { order = order, isGeneric = isGeneric, isSubrecord = False })
+        |> (\k ->
+                if subrecordTreatment == AlwaysCanonical then
+                    ( "", k )
+                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType ("." ++ f) t) (Dict.toList k.order)
+
+                else
+                    -- Only create the top level record
+                    [ ( "", k ) ]
+           )
+
+
+{-| Wrapper for `typeAnnotToType` when not dealing with aliases.
+-}
+typeAnnotToNoncanonicalType : ModuleContext -> Node TypeAnnotation -> Type
+typeAnnotToNoncanonicalType context =
+    typeAnnotToType context
+        { constrainedTypeVarsAreRespected = True
+        , subrecordIsAlsoCanonical = Nothing
+        }
+
+
+{-| Given context and whether or not a top-level record type (if `Just`) and
+subrecords (if `Just True`) found are in canonical order, convert a
+`TypeAnnotation` into a `Type`.
+-}
+typeAnnotToType : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> Node TypeAnnotation -> Type
+typeAnnotToType context ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanonical } as settings) annot =
     let
         go : Node TypeAnnotation -> Type
         go =
-            typeAnnotToType context settings
+            MaybeX.filter identity subrecordIsAlsoCanonical
+                |> (\subrecordStillCanon ->
+                        typeAnnotToType context { settings | subrecordIsAlsoCanonical = subrecordStillCanon }
+                   )
 
         makeList : ModuleName -> String -> List (Node TypeAnnotation) -> Maybe Type
         makeList moduleName name args =
@@ -1391,7 +1569,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
         Record fs ->
             RecordType
                 { generic = Nothing
-                , canonical = recordIsCanonical
+                , canonical = subrecordIsAlsoCanonical /= Nothing
                 , fields = List.map (Tuple.mapBoth Node.value go << Node.value) fs
                 }
 
@@ -1402,7 +1580,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, recordIsCanonical } 
                     -- `type alias G comparable = { comparable | x : Int }`
                     -- is just a normal generic record.
                     Just <| TypeVar Nothing <| Node.value generic
-                , canonical = recordIsCanonical
+                , canonical = subrecordIsAlsoCanonical /= Nothing
                 , fields = List.map (Tuple.mapBoth Node.value go << Node.value) <| Node.value fs
                 }
 
@@ -2301,10 +2479,7 @@ recordDefToCheckable context fullRange hasAllFields hasTypeFromParent fields =
     let
         makeType : Node TypeAnnotation -> Maybe DereferencedType
         makeType =
-            typeAnnotToType context
-                { constrainedTypeVarsAreRespected = True
-                , recordIsCanonical = False
-                }
+            typeAnnotToNoncanonicalType context
                 >> dereferenceType context
                 >> Just
 
@@ -2519,18 +2694,28 @@ checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context ({
             -- Assume opening `{` is just the first character of the range.
             { start = s, end = { s | column = s.column + 1 } }
 
-        matchingOrders : ( List { typeName : List ( ModuleName, String ), fieldOrder : Dict String Int, hasUnknownFields : Bool, canonicalFieldTypes : Dict String Type }, Bool )
+        matchingOrders :
+            ( List
+                { typeName : List ( ModuleName, String )
+                , fieldOrder : Dict String Int
+                , hasUnknownFields : Bool
+                , canonicalFieldTypes : Dict String Type
+                , isSubrecord : Bool
+                }
+            , Bool
+            )
         matchingOrders =
             findMatchingTypes context orderInfo fields
                 |> List.map
-                    (\( t, match ) ->
-                        makeOrder sortGenerics fields match
+                    (\{ typeName, fieldOrder, isSubrecord } ->
+                        makeOrder sortGenerics fields fieldOrder
                             |> (\o ->
                                     ( Dict.toList o.fieldOrder
-                                    , { typeName = t
+                                    , { typeName = typeName
                                       , fieldOrder = o.fieldOrder
                                       , hasUnknownFields = o.hasUnknownFields
                                       , canonicalFieldTypes = o.canonicalFieldTypes
+                                      , isSubrecord = isSubrecord
                                       }
                                     )
                                )
@@ -2552,14 +2737,21 @@ checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context ({
                     )
                 |> Dict.values
                 |> List.partition .hasUnknownFields
+                |> Tuple.mapBoth (List.partition .isSubrecord) (List.partition .isSubrecord)
                 |> (\os ->
                         case os of
-                            -- Prefer matches without unknown fields
-                            ( hasUnknown, [] ) ->
-                                ( hasUnknown, True )
+                            -- Prefer matches without unknown fields and that are not subrecords
+                            ( ( unknownIsSubrecord, [] ), ( [], [] ) ) ->
+                                ( unknownIsSubrecord, True )
 
-                            ( _, noUnknown ) ->
-                                ( noUnknown, False )
+                            ( ( _, unknownNotSubrecord ), ( [], [] ) ) ->
+                                ( unknownNotSubrecord, True )
+
+                            ( _, ( noUnknownIsSubrecord, [] ) ) ->
+                                ( noUnknownIsSubrecord, False )
+
+                            ( _, ( _, noUnknownNotSubrecord ) ) ->
+                                ( noUnknownNotSubrecord, False )
                    )
 
         alphabetical : Field -> Field -> Order
@@ -2711,16 +2903,23 @@ makeOrder sortGenerics inFields (FieldOrder inOrder) =
 appropriate canonical ordering, and a list of fields, return all matching field
 orders.
 -}
-findMatchingTypes : ModuleContext -> Maybe OrderInfo -> List Field -> List ( List ( ModuleName, String ), FieldOrder )
+findMatchingTypes : ModuleContext -> Maybe OrderInfo -> List Field -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
 findMatchingTypes context info matchFields =
     let
-        getMatches : List Field -> List ( List ( ModuleName, String ), FieldOrder )
+        getMatches : List Field -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
         getMatches fs =
             let
                 { canonicalMatches, genericMatches } =
                     searchOrders context hasAllFields fs
             in
-            List.map (Tuple.mapBoth List.singleton (toFieldOrder Nothing)) canonicalMatches
+            List.map
+                (\( name, k ) ->
+                    { typeName = [ name ]
+                    , fieldOrder = toFieldOrder Nothing k
+                    , isSubrecord = k.isSubrecord
+                    }
+                )
+                canonicalMatches
                 ++ List.concatMap makeGeneric genericMatches
 
         toFieldOrder : Maybe Generic -> KnownRecord -> FieldOrder
@@ -2730,18 +2929,28 @@ findMatchingTypes context info matchFields =
                 , generic = generic
                 }
 
-        makeGeneric : { type_ : ( ( ModuleName, String ), KnownRecord ), missing : List Field } -> List ( List ( ModuleName, String ), FieldOrder )
+        makeGeneric : { type_ : ( ( ModuleName, String ), KnownRecord ), missing : List Field } -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
         makeGeneric { type_, missing } =
             let
                 ( n, rec ) =
                     type_
             in
             getMatches missing
-                |> List.map (\( names, f ) -> ( n :: names, toFieldOrder (Just <| OrderedFields f) rec ))
+                |> List.map
+                    (\{ typeName, fieldOrder, isSubrecord } ->
+                        { typeName = n :: typeName
+                        , fieldOrder = toFieldOrder (Just <| OrderedFields fieldOrder) rec
+                        , isSubrecord = rec.isSubrecord || isSubrecord
+                        }
+                    )
                 |> (\ls ->
                         if List.isEmpty ls then
                             -- Either it's an empty generic or nothing matched; either way just say what fields are missing
-                            [ ( [ n ], toFieldOrder (Just <| UnknownFields <| List.map .field missing) rec ) ]
+                            [ { typeName = [ n ]
+                              , fieldOrder = toFieldOrder (Just <| UnknownFields <| List.map .field missing) rec
+                              , isSubrecord = rec.isSubrecord
+                              }
+                            ]
 
                         else
                             ls
@@ -2759,8 +2968,11 @@ findMatchingTypes context info matchFields =
     case info of
         Just (HasFieldOrder f) ->
             -- Don't worry about module name, because this will never be ambiguous
-            ( [], f )
-                |> List.singleton
+            [ { typeName = []
+              , fieldOrder = f
+              , isSubrecord = False
+              }
+            ]
 
         _ ->
             getMatches matchFields
