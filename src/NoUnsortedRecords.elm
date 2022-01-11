@@ -2740,7 +2740,7 @@ keepOnlyMatchingFieldTypes d1 d2 =
 returning a list of canonical field types, if any were found.
 -}
 checkRecord : RuleConfig -> ModuleContext -> RecordToCheck -> ( List (Error {}), Dict String Type )
-checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context ({ fullRange, orderInfo, fields } as record) =
+checkRecord ((RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) as config) context ({ fullRange, orderInfo, fields } as record) =
     let
         errorRange : Range
         errorRange =
@@ -2763,7 +2763,7 @@ checkRecord (RuleConfig { sortUnknown, sortAmbiguous, sortGenerics }) context ({
             , Bool
             )
         matchingOrders =
-            findMatchingTypes context orderInfo fields
+            findMatchingTypes config context orderInfo fields
                 |> List.map
                     (\{ typeName, fieldOrder, isSubrecord } ->
                         makeOrder sortGenerics fields fieldOrder
@@ -2961,14 +2961,18 @@ makeOrder sortGenerics inFields (FieldOrder inOrder) =
 appropriate canonical ordering, and a list of fields, return all matching field
 orders.
 -}
-findMatchingTypes : ModuleContext -> Maybe OrderInfo -> List Field -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
-findMatchingTypes context info matchFields =
+findMatchingTypes : RuleConfig -> ModuleContext -> Maybe OrderInfo -> List Field -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
+findMatchingTypes config context info matchFields =
     let
         getMatches : List Field -> List { typeName : List ( ModuleName, String ), fieldOrder : FieldOrder, isSubrecord : Bool }
         getMatches fs =
             let
                 { canonicalMatches, genericMatches } =
-                    searchOrders context hasAllFields fs
+                    if List.isEmpty fs then
+                        { canonicalMatches = [], genericMatches = [] }
+
+                    else
+                        searchOrders config context hasAllFields fs
             in
             List.map
                 (\( name, k ) ->
@@ -3055,8 +3059,8 @@ type alias OrderMatches =
 {-| Given context and a predicate to filter valid records, find a list of
 records that match a list of fields.
 -}
-searchOrders : ModuleContext -> Bool -> List Field -> OrderMatches
-searchOrders context hasAllFields fields =
+searchOrders : RuleConfig -> ModuleContext -> Bool -> List Field -> OrderMatches
+searchOrders (RuleConfig { typecheckUnambiguousRecords }) context hasAllFields fields =
     let
         matchFields : Dict String Field
         matchFields =
@@ -3096,11 +3100,7 @@ searchOrders context hasAllFields fields =
 
         step : ModuleName -> String -> KnownRecord -> OrderMatches -> OrderMatches
         step moduleName name o acc =
-            if not (checkTypes o) then
-                -- Typecheck failed
-                acc
-
-            else if Dict.size (Dict.diff o.order matchFields) >= missingFieldLimit o then
+            if Dict.size (Dict.diff o.order matchFields) >= missingFieldLimit o then
                 -- Too many fields are missing
                 acc
 
@@ -3121,31 +3121,25 @@ searchOrders context hasAllFields fields =
                 -- Record was not generic but extra fields were present, so it wasn't a match
                 acc
     in
-    if List.isEmpty fields then
+    Dict.foldl
+        (\moduleName moduleTypes outerAcc ->
+            Dict.foldl
+                (step moduleName)
+                outerAcc
+                moduleTypes
+        )
         { canonicalMatches = [], genericMatches = [] }
+        context.canonicalRecords
+        |> (\({ canonicalMatches, genericMatches } as res) ->
+                if typecheckUnambiguousRecords || List.length canonicalMatches + List.length genericMatches > 1 then
+                    -- If there are multiple matches, try to disambiguate by type
+                    { canonicalMatches = List.filter (checkTypes << Tuple.second) canonicalMatches
+                    , genericMatches = List.filter (checkTypes << Tuple.second << .type_) genericMatches
+                    }
 
-    else
-        Dict.foldl
-            (\moduleName moduleTypes outerAcc ->
-                Dict.foldl
-                    (step moduleName)
-                    outerAcc
-                    moduleTypes
-            )
-            { canonicalMatches = [], genericMatches = [] }
-            context.canonicalRecords
-
-
-
--- |> (\({ canonicalMatches, genericMatches } as res) ->
---         if List.length canonicalMatches + List.length genericMatches > 1 then
---             -- If there are multiple matches, try to disambiguate by type
---             { canonicalMatches = List.filter (checkTypes << Tuple.second) canonicalMatches
---             , genericMatches = List.filter (checkTypes << Tuple.second << .type_) genericMatches
---             }
---         else
---             res
---    )
+                else
+                    res
+           )
 
 
 {-| Check two `Type`s and see if they are theoretically equivalent (e.g. type
