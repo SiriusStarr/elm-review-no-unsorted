@@ -11,6 +11,7 @@ import NoUnsortedRecords
         , sortGenericFieldsLast
         , treatSubrecordsAsCanonical
         , treatSubrecordsAsUnknown
+        , typecheckAllRecords
         )
 import Review.Project exposing (addDependency)
 import Review.Test
@@ -41,6 +42,7 @@ all =
         , localBindingSupport
         , simpleTypeInferenceSupport
         , subrecords
+        , typecheckUnambiguous
         ]
 
 
@@ -2916,6 +2918,56 @@ type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
 type alias B = { baz : Int, bar : Int, foo : Int }
 
 func = { baz = 3 , bar = 2, foo = 1}
+"""
+                        ]
+        ]
+
+
+typecheckUnambiguous : Test
+typecheckUnambiguous =
+    describe "unambiguous records"
+        [ test "are not type-checked by default" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int, baz : Int }
+
+func = { bar = 2, foo = 1.1, baz = 3 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int, baz : Int }
+
+func = { foo = 1.1, bar = 2, baz = 3 }
+"""
+                        ]
+        , test "are type-checked with option" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int, baz : Int }
+
+func = { bar = 2, foo = 1.1, baz = 3 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> typecheckAllRecords
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { foo : Int, bar : Int, baz : Int }
+
+func = { bar = 2, baz = 3 , foo = 1.1}
 """
                         ]
         ]
