@@ -9,6 +9,7 @@ import NoUnsortedRecords
         , reportUnknownRecordsWithoutFix
         , rule
         , sortGenericFieldsLast
+        , treatSubrecordsAsUnknown
         )
 import Review.Project exposing (addDependency)
 import Review.Test
@@ -2756,6 +2757,72 @@ func : { yi : (Int, List {  foo : Int,bar : Int, baz : Int }), er : Int }
 func = { yi = (0, []), er = 1 }
 """
                         ]
+        , test "are not sorted with setting in larger record" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { er = 1, yi = { bar = 2, baz = 3, foo = 1 } }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsUnknown
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { yi = { bar = 2, baz = 3, foo = 1 } , er = 1}
+"""
+                        ]
+        , test "are not sorted with setting in larger record with type annotation" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : A
+func = { er = 1, yi = { bar = 2, baz = 3, foo = 1 } }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsUnknown
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 8 }, end = { row = 6, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func : A
+func = { yi = { bar = 2, baz = 3, foo = 1 } , er = 1}
+"""
+                        ]
+        , test "are not sorted for custom types with setting" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom
+    = A { foo : Int, bar : Int, baz : Int }
+    | B { bar : Int, foo : Int, baz : Int }
+
+a = A { bar = 2, baz = 3, foo = 1 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsUnknown
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         ]
 
 
