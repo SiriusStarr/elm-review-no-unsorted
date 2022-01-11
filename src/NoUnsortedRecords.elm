@@ -1,6 +1,6 @@
 module NoUnsortedRecords exposing
     ( rule
-    , RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix
+    , RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix, treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
     )
 
 {-|
@@ -13,7 +13,7 @@ module NoUnsortedRecords exposing
 
 ## Configuration
 
-@docs RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix
+@docs RuleConfig, defaults, sortGenericFieldsLast, doNotSortAmbiguousRecords, doNotSortUnknownRecords, reportAmbiguousRecordsWithoutFix, reportUnknownRecordsWithoutFix, treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
 
 -}
 
@@ -307,7 +307,24 @@ type RuleConfig
         { sortUnknown : SortWithoutCanonicalOrder
         , sortAmbiguous : SortWithoutCanonicalOrder
         , sortGenerics : SortGenerics
+        , subrecordTreatment : SubrecordCanonicity
         }
+
+
+{-| Specify how to deal with subrecords.
+
+  - `CanonicalWhenSubrecord` -- Subrecords have canonical order only when they
+    are part of their larger record/constructor.
+  - `AlwaysUnknown` -- Always consider subrecords unknown records (unless of
+    course they match something else).
+  - `AlwaysCanonical` -- Check for standalone subrecords as a lower-priority
+    "known" record.
+
+-}
+type SubrecordCanonicity
+    = CanonicalWhenSubrecord
+    | AlwaysUnknown
+    | AlwaysCanonical
 
 
 {-| Specify how to handle generic records.
@@ -332,6 +349,8 @@ type SortWithoutCanonicalOrder
   - Ambiguous records (those that match more than one canonical order) are
     sorted alphabetically
   - Generic fields of generic records are sorted before the canonical ones.
+  - Subrecords are treated as having canonical order only when associated with
+    their outer record/constructor.
 
 Use `reportUnknownRecordsWithoutFix`, etc. to alter this behavior, e.g.
 
@@ -349,7 +368,59 @@ defaults =
         { sortUnknown = Alphabetically
         , sortAmbiguous = Alphabetically
         , sortGenerics = GenericFieldsFirst
+        , subrecordTreatment = CanonicalWhenSubrecord
         }
+
+
+{-| By default, anonymous records within known records and within custom type
+constructors are sorted by their declaration order when encountered in the
+context of their outer record/constructor. This disables that behavior,
+treating them the same as any other unknown record.
+
+For example:
+
+    type A
+        = A { foo : Int, bar : Int, baz : Int }
+
+    type alias Rec =
+        { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+    thisWillBeUnknown =
+        A { bar = 1, baz = 2, foo = 3 }
+
+    and =
+        { yi =
+            -- This will also be unknown
+            { bar = 1, baz = 2, foo = 3 }
+        , er = 1
+        }
+
+-}
+treatSubrecordsAsUnknown : RuleConfig -> RuleConfig
+treatSubrecordsAsUnknown (RuleConfig r) =
+    RuleConfig { r | subrecordTreatment = AlwaysUnknown }
+
+
+{-| By default, anonymous records within known records and within custom type
+constructors are sorted by their declaration order when encountered in the
+context of their outer record/constructor. This extends that behavior to sort
+them even when encountered alone (i.e. not in the context of their parent
+record/constructor. Note that canonical records will always take priority,
+however.
+
+For example:
+
+    type alias Rec =
+        { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+    thisWillHaveCanonicalOrder =
+        -- Even though it does not appear in the context of `Rec`
+        { foo = 3, bar = 1, baz = 2 }
+
+-}
+treatSubrecordsAsCanonical : RuleConfig -> RuleConfig
+treatSubrecordsAsCanonical (RuleConfig r) =
+    RuleConfig { r | subrecordTreatment = AlwaysCanonical }
 
 
 {-| By default, records that do not match any known aliases or custom types are
