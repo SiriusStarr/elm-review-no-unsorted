@@ -9,6 +9,7 @@ import NoUnsortedRecords
         , reportUnknownRecordsWithoutFix
         , rule
         , sortGenericFieldsLast
+        , treatSubrecordsAsCanonical
         , treatSubrecordsAsUnknown
         )
 import Review.Project exposing (addDependency)
@@ -2823,6 +2824,100 @@ a = A { bar = 2, baz = 3, foo = 1 }
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
+        , test "are sorted with setting when not in context from alias" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { bar = 2, baz = 3, foo = 1 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsCanonical
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { foo = 1 , bar = 2, baz = 3}
+"""
+                        ]
+        , test "are sorted with setting when not in context from constructor" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { bar = 2, baz = 3, foo = 1 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsCanonical
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 5, column = 8 }, end = { row = 5, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type A = A { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+
+func = { foo = 1 , bar = 2, baz = 3}
+"""
+                        ]
+        , test "handle ambiguity with subrecords with setting" <|
+            \() ->
+                """module A exposing (..)
+
+type Custom
+    = A { foo : Int, bar : Int, baz : Int }
+    | B { bar : Int, foo : Int, baz : Int }
+
+a = { bar = 2, baz = 3, foo = 1 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsCanonical
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ ambiguousRecordError [ "A.A arg0", "A.B arg0" ] "{ bar = 2, baz = 3, foo = 1 }"
+                        ]
+        , test "do not take priority" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+type alias B = { baz : Int, bar : Int, foo : Int }
+
+func = { foo = 1, bar = 2, baz = 3 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatSubrecordsAsCanonical
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 6, column = 8 }, end = { row = 6, column = 9 } }
+                            |> Review.Test.whenFixed
+                                """module A exposing (..)
+
+type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
+type alias B = { baz : Int, bar : Int, foo : Int }
+
+func = { baz = 3 , bar = 2, foo = 1}
+"""
+                        ]
         ]
 
 
