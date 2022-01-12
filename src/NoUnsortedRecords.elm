@@ -4,7 +4,7 @@ module NoUnsortedRecords exposing
     , sortGenericFieldsLast
     , doNotSortAmbiguousRecords, reportAmbiguousRecordsWithoutFix
     , doNotSortUnknownRecords, reportUnknownRecordsWithoutFix
-    , treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+    , treatSubrecordsAsUnknown, treatAllSubrecordsAsCanonical, treatCustomTypeRecordsAsCanonical
     , typecheckAllRecords
     )
 
@@ -46,7 +46,7 @@ An unknown record is a record that does not match any known "canonical" records.
 Subrecords are records that are either within the fields of a type alias or are
 arguments of a custom type.
 
-@docs treatSubrecordsAsUnknown, treatSubrecordsAsCanonical
+@docs treatSubrecordsAsUnknown, treatAllSubrecordsAsCanonical, treatCustomTypeRecordsAsCanonical
 
 
 ### Other Settings
@@ -97,7 +97,7 @@ information.
 
 ## "Proper" Order
 
-Proper order may be defined in two ways. Firstly, type aliases define order,
+Proper order may be defined in several ways. Firstly, type aliases define order,
 e.g.
 
     type alias MyRecord =
@@ -106,32 +106,33 @@ e.g.
 creates a record with name `MyRecord` and the known field order `foo`, `bar`,
 `baz`.
 
-Secondly, records without a defined type alias that are nevertheless attached to
-a custom type are considered to be in the order they are defined in the source:
+Secondly, records without a defined type alias that are nevertheless either a
+subrecord of a type alias or attached to a custom type are considered to be in
+the order they are defined in the source:
 
     type MyType
         = A Int { foo : Int, bar : Int, baz : Int }
         | B { b : Int, a : Int, c : Int } String
 
-creates two known records, with the field orders `foo`, `bar`, `baz` and `b`,
-`a`, `c`, respectively. This is true for records within fields of type aliases
-as well.
+when encountered in their larger context. By default, these are _not_ considered
+canonical records when encountered alone, though this behavior may be turned on
+with [`treatAllSubrecordsAsCanonical`](#treatAllSubrecordsAsCanonical) or
+[`treatCustomTypeRecordsAsCanonical`](#treatCustomTypeRecordsAsCanonical).
 
 
 ## Inference/Disambiguation
 
 Since records are not associated with a unique name, it is necessary to infer
 what type alias a record matches. In the most ambiguous case, all type aliases
-are checked for matching fields. If none are found, then the rule can't match
-it to a specific order (though it may still optionally be sorted
-alphabetically).
+are checked for matching fields. If none are found, then the rule can't match it
+to a specific order (though it may still optionally be sorted alphabetically).
 
 If only one matching type alias is found, then the rule will sort by that order.
 
 In the case of multiple matching field sets, several things may happen. If all
 of the field sets have the same order, then it isn't necessary to unambiguously
-identify which is being matched, and that one order will be used. Otherwise,
-the rule is capable of using the following disambiguation rules:
+identify which is being matched, and that one order will be used. Otherwise, the
+rule is capable of using the following disambiguation rules:
 
   - Disambiguation by the fact that all fields must be present:
 
@@ -297,9 +298,8 @@ canonical order for possibly-ambiguous records identical.
 If you want to ensure that this rule is not encountering ambiguous/unknown
 records, then you can use `reportAmbiguousRecordsWithoutFix` and/or
 `reportUnknownRecordsWithoutFix` to report them without automatically sorting
-them alphabetically. Alternately, you can use `doNotSortAmbiguousRecords`
-and/or `doNotSortUnknownRecords` to disable all sorting/error reporting for
-them.
+them alphabetically. Alternately, you can use `doNotSortAmbiguousRecords` and/or
+`doNotSortUnknownRecords` to disable all sorting/error reporting for them.
 
 
 ## When (not) to enable this rule
@@ -354,6 +354,9 @@ type RuleConfig
 
   - `CanonicalWhenSubrecord` -- Subrecords have canonical order only when they
     are part of their larger record/constructor.
+  - `CustomTypeArgsAlwaysCanonical` -- Arguments of custom types are always
+    canonical, but other subrecords are only canonical in place. This was the
+    behavior prior to 1.1.0.
   - `AlwaysUnknown` -- Always consider subrecords unknown records (unless of
     course they match something else).
   - `AlwaysCanonical` -- Check for standalone subrecords as a lower-priority
@@ -362,6 +365,7 @@ type RuleConfig
 -}
 type SubrecordCanonicity
     = CanonicalWhenSubrecord
+    | CustomTypeArgsAlwaysCanonical
     | AlwaysUnknown
     | AlwaysCanonical
 
@@ -462,6 +466,29 @@ treatSubrecordsAsUnknown (RuleConfig r) =
 {-| By default, anonymous records within known records and within custom type
 constructors are sorted by their declaration order when encountered in the
 context of their outer record/constructor. This extends that behavior to sort
+custom type args even when encountered alone (i.e. not in the context of their
+constructor. This was the behavior prior to version `1.1.0` and thus this
+setting is provided for compatibility. Note that canonical records will always
+take priority, however.
+
+For example:
+
+    type A
+        = A { foo : Int, bar : Int, baz : Int }
+
+    thisWillHaveCanonicalOrder =
+        -- Even though it does not appear in the context of `A`
+        { foo = 3, bar = 1, baz = 2 }
+
+-}
+treatCustomTypeRecordsAsCanonical : RuleConfig -> RuleConfig
+treatCustomTypeRecordsAsCanonical (RuleConfig r) =
+    RuleConfig { r | subrecordTreatment = CustomTypeArgsAlwaysCanonical }
+
+
+{-| By default, anonymous records within known records and within custom type
+constructors are sorted by their declaration order when encountered in the
+context of their outer record/constructor. This extends that behavior to sort
 them even when encountered alone (i.e. not in the context of their parent
 record/constructor. Note that canonical records will always take priority,
 however.
@@ -476,8 +503,8 @@ For example:
         { foo = 3, bar = 1, baz = 2 }
 
 -}
-treatSubrecordsAsCanonical : RuleConfig -> RuleConfig
-treatSubrecordsAsCanonical (RuleConfig r) =
+treatAllSubrecordsAsCanonical : RuleConfig -> RuleConfig
+treatAllSubrecordsAsCanonical (RuleConfig r) =
     RuleConfig { r | subrecordTreatment = AlwaysCanonical }
 
 
