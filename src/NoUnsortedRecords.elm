@@ -868,6 +868,9 @@ subrecordCanonicityForRecord subrecordTreatment =
         CanonicalWhenSubrecord ->
             Just True
 
+        CustomTypeArgsAlwaysCanonical ->
+            Just True
+
         AlwaysUnknown ->
             Just False
 
@@ -882,6 +885,9 @@ subrecordCanonicityForField : SubrecordCanonicity -> Maybe Bool
 subrecordCanonicityForField subrecordTreatment =
     case subrecordTreatment of
         CanonicalWhenSubrecord ->
+            Just True
+
+        CustomTypeArgsAlwaysCanonical ->
             Just True
 
         AlwaysUnknown ->
@@ -973,8 +979,7 @@ dependencyVisitor (RuleConfig { subrecordTreatment }) =
                         |> (\ts ->
                                 ( name
                                 , makeFunctionTypeWithPositionalVars return ts
-                                , List.indexedMap (\i t -> makeSubrecordsFromType (name ++ " arg" ++ String.fromInt i) <| getTypeWithPositionalVars t) ts
-                                    |> List.concat
+                                , makeCustomTypeSubrecords subrecordTreatment name ts
                                 )
                            )
 
@@ -1135,7 +1140,7 @@ knownRecordFromDocType subrecordTreatment currentModule ( fields, isGeneric ) =
         |> (\k ->
                 if subrecordTreatment == AlwaysCanonical then
                     ( "", k )
-                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType ("." ++ f) t) (Dict.toList k.order)
+                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType True ("." ++ f) t) (Dict.toList k.order)
 
                 else
                     -- Only create the top level record
@@ -1143,15 +1148,19 @@ knownRecordFromDocType subrecordTreatment currentModule ( fields, isGeneric ) =
            )
 
 
-{-| Given a name prefix and a type, generate `KnownRecord`s for all records in
-that type.
+{-| Given whether or not to descend beyond the initial type, a name prefix and a
+type, generate `KnownRecord`s for records in that type.
 -}
-makeSubrecordsFromType : String -> Type -> List ( String, KnownRecord )
-makeSubrecordsFromType namePrefix type_ =
+makeSubrecordsFromType : Bool -> String -> Type -> List ( String, KnownRecord )
+makeSubrecordsFromType recurse namePrefix type_ =
     let
         go : Maybe String -> Type -> List ( String, KnownRecord )
         go s =
-            makeSubrecordsFromType (MaybeX.unwrap namePrefix ((++) namePrefix) s)
+            if recurse then
+                makeSubrecordsFromType recurse (MaybeX.unwrap namePrefix ((++) namePrefix) s)
+
+            else
+                always []
     in
     case type_ of
         FunctionType { from, to } ->
@@ -1303,6 +1312,35 @@ getAlias node =
             Nothing
 
 
+{-| Make subrecords for custom types, if appropriate.
+-}
+makeCustomTypeSubrecords : SubrecordCanonicity -> String -> List TypeWithPositionalVars -> List ( String, KnownRecord )
+makeCustomTypeSubrecords subrecordTreatment n ts =
+    (case subrecordTreatment of
+        AlwaysUnknown ->
+            Nothing
+
+        CanonicalWhenSubrecord ->
+            Nothing
+
+        CustomTypeArgsAlwaysCanonical ->
+            Just False
+
+        AlwaysCanonical ->
+            Just True
+    )
+        |> MaybeX.unwrap []
+            (\recurse ->
+                List.indexedMap
+                    (\i t ->
+                        getTypeWithPositionalVars t
+                            |> makeSubrecordsFromType recurse (n ++ " arg" ++ String.fromInt i)
+                    )
+                    ts
+                    |> List.concat
+            )
+
+
 {-| Visit declarations, storing record field orders.
 -}
 declarationListVisitor : RuleConfig -> ModuleContext -> List (Node Declaration) -> ModuleContext
@@ -1338,8 +1376,7 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                         in
                         ( n
                         , makeFunctionTypeWithPositionalVars return ts
-                        , List.indexedMap (\i t -> makeSubrecordsFromType (n ++ " arg" ++ String.fromInt i) <| getTypeWithPositionalVars t) ts
-                            |> List.concat
+                        , makeCustomTypeSubrecords subrecordTreatment n ts
                         )
                    )
 
@@ -1586,7 +1623,7 @@ knownRecordFromTypeAnnot subrecordTreatment context ( fields, isGeneric ) =
         |> (\k ->
                 if subrecordTreatment == AlwaysCanonical then
                     ( "", k )
-                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType ("." ++ f) t) (Dict.toList k.order)
+                        :: List.concatMap (\( f, ( _, t ) ) -> makeSubrecordsFromType True ("." ++ f) t) (Dict.toList k.order)
 
                 else
                     -- Only create the top level record
