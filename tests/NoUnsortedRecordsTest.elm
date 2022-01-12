@@ -9,7 +9,8 @@ import NoUnsortedRecords
         , reportUnknownRecordsWithoutFix
         , rule
         , sortGenericFieldsLast
-        , treatSubrecordsAsCanonical
+        , treatAllSubrecordsAsCanonical
+        , treatCustomTypeRecordsAsCanonical
         , treatSubrecordsAsUnknown
         , typecheckAllRecords
         )
@@ -2593,6 +2594,32 @@ type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
 func = { er = 1, yi = { foo = 1, bar = 2, baz = 3 } }
 """
                         ]
+        , test "are not sorted by default from constructor when not part of constructor" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A { foo : Int, bar : Int, baz : Int }
+
+func = { bar = 2, baz = 3, foo = 1 }
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "are sorted from constructor when not part of constructor with setting" <|
+            \() ->
+                """module A exposing (..)
+
+type alias Rec = { yi : { bar : Int, baz : Int, foo : Int }, er : Int }
+
+type A = A { foo : Int, bar : Int, baz : Int }
+
+func = { foo = 1, bar = 2, baz = 3 }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> treatCustomTypeRecordsAsCanonical
+                            |> rule
+                        )
+                    |> Review.Test.expectNoErrors
         , test "are sorted by default in larger record with type annotation" <|
             \() ->
                 """module A exposing (..)
@@ -2836,7 +2863,7 @@ func = { bar = 2, baz = 3, foo = 1 }
 """
                     |> Review.Test.run
                         (defaults
-                            |> treatSubrecordsAsCanonical
+                            |> treatAllSubrecordsAsCanonical
                             |> rule
                         )
                     |> Review.Test.expectErrors
@@ -2860,7 +2887,7 @@ func = { bar = 2, baz = 3, foo = 1 }
 """
                     |> Review.Test.run
                         (defaults
-                            |> treatSubrecordsAsCanonical
+                            |> treatAllSubrecordsAsCanonical
                             |> rule
                         )
                     |> Review.Test.expectErrors
@@ -2886,7 +2913,7 @@ a = { bar = 2, baz = 3, foo = 1 }
 """
                     |> Review.Test.run
                         (defaults
-                            |> treatSubrecordsAsCanonical
+                            |> treatAllSubrecordsAsCanonical
                             |> reportAmbiguousRecordsWithoutFix
                             |> rule
                         )
@@ -2904,7 +2931,7 @@ func = { foo = 1, bar = 2, baz = 3 }
 """
                     |> Review.Test.run
                         (defaults
-                            |> treatSubrecordsAsCanonical
+                            |> treatAllSubrecordsAsCanonical
                             |> reportAmbiguousRecordsWithoutFix
                             |> rule
                         )
