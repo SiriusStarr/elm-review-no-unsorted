@@ -2591,10 +2591,6 @@ checkPattern config context hasType node =
 
 {-| Given an error range and whether or not a record has all fields of the known
 type, convert a `RecordDefinition` into a checkable record.
-
-This currently works around the `elm-syntax` issue with `TypeAnnotation.Record`
-ranges: <https://github.com/stil4m/elm-syntax/issues/154>
-
 -}
 recordDefToCheckable : ModuleContext -> Range -> Bool -> Maybe DereferencedType -> RecordDefinition -> RecordToCheck
 recordDefToCheckable context fullRange hasAllFields hasTypeFromParent fields =
@@ -2617,42 +2613,15 @@ recordDefToCheckable context fullRange hasAllFields hasTypeFromParent fields =
                         Nothing
                     )
     in
-    (if hasAllFields then
-        -- Not a generic record, so the ranges need fixing
-        List.indexedMap
-            (\i f ->
-                let
-                    r : Range
-                    r =
-                        Node.range f
-
-                    ( field, type_ ) =
-                        Node.value f
-                in
-                if i /= 0 then
-                    let
-                        start : Location
-                        start =
-                            r.start
-                    in
-                    { field = Node.value field, type_ = makeType type_, range = { r | start = { start | column = start.column + 1 } } }
-
-                else
-                    { field = Node.value field, type_ = makeType type_, range = r }
-            )
-            fields
-
-     else
-        List.map
-            (\f ->
-                let
-                    ( field, type_ ) =
-                        Node.value f
-                in
-                { field = Node.value field, type_ = makeType type_, range = Node.range f }
-            )
-            fields
-    )
+    List.map
+        (\f ->
+            let
+                ( field, type_ ) =
+                    Node.value f
+            in
+            { field = Node.value field, type_ = makeType type_, range = Node.range f }
+        )
+        fields
         |> (\fs ->
                 { fullRange = fullRange
                 , orderInfo = orderInfo
