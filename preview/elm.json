@@ -16,7 +16,7 @@
             "elm-community/result-extra": "2.4.0",
             "elm-community/string-extra": "4.0.1",
             "jfmengels/elm-review": "2.6.2",
-            "stil4m/elm-syntax": "7.2.8"
+            "stil4m/elm-syntax": "7.2.9"
         },
         "indirect": {
             "avh4/elm-fifo": "1.0.4",
