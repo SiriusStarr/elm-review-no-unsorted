@@ -402,7 +402,7 @@ a _ = True
                         [ unsortedError
                             |> Review.Test.whenFixed """module A exposing (..)
 
-a : {  a : Int ,b : Int, c : Int} -> Bool
+a : { a : Int , b : Int, c : Int} -> Bool
 a _ = True
 """
                         ]
@@ -425,9 +425,9 @@ a _ =
                             |> Review.Test.whenFixed """module A exposing (..)
 
 a :
-    {  a : Int
+    { a : Int
     
-    ,b : Int, c : Int
+    , b : Int, c : Int
     }
     -> Bool
 a _ =
@@ -625,7 +625,7 @@ type alias A = { foo : Int, baz : Int, bar : Int }
 
 type alias B = { baz : Int, bar : Int, foo : Int, extra : Int }
 
-a : {  bar : Int ,baz : Int} -> Bool
+a : { bar : Int , baz : Int} -> Bool
 a _ = True
 """
                         ]
@@ -650,7 +650,7 @@ type alias A = { foo : Int, baz : Int, bar : Int }
 
 type alias B = { baz : Int, bar : Int, foo : Int, extra : Int }
 
-a : {  foo : Int, baz : Int ,bar : Int} -> Bool
+a : { foo : Int, baz : Int , bar : Int} -> Bool
 a _ = True
 """
                         ]
@@ -1437,7 +1437,7 @@ func { bar, foo, baz } = True
 type alias A = { foo : Int, bar : Int, baz : Int }
 type alias B = { bar : String, foo : Int, baz : Int }
 
-func : {  foo : Int,bar : Int, baz : Int } -> Bool
+func : { foo : Int, bar : Int, baz : Int } -> Bool
 func { bar, foo, baz } = True
 """
                         , unsortedError
@@ -1520,7 +1520,7 @@ func { bar, foo, baz } = True
 type alias A = { foo : { a : Int, b : String }, bar : Int, baz : Int }
 type alias B = { bar : Int, foo : {a : String, b : String }, baz : Int }
 
-func : {  foo : { a : Int, b : String },bar : Int, baz : Int } -> Bool
+func : { foo : { a : Int, b : String }, bar : Int, baz : Int } -> Bool
 func { bar, foo, baz } = True
 """
                         , unsortedError
@@ -1732,7 +1732,7 @@ import Parser exposing (deadEndsToString, DeadEnd, Problem (..))
 
 type alias MyDeadEnd = { col : Int, row : Int, problem : String }
 
-a : {  row : Int,col : Int, problem : Problem }
+a : { row : Int, col : Int, problem : Problem }
 a = { problem = BadRepeat, col = 1, row = 2 }
 """
                         ]
@@ -2719,7 +2719,7 @@ func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
 
 type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
 
-func : {  yi : { bar : Int, foo : Int, baz : Int } ,er : Int}
+func : { yi : { bar : Int, foo : Int, baz : Int } , er : Int}
 func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
 """
                         , unsortedError
@@ -2729,7 +2729,7 @@ func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
 
 type alias A = { yi : { foo : Int, bar : Int, baz : Int }, er : Int }
 
-func : { er : Int, yi : {  foo : Int,bar : Int, baz : Int } }
+func : { er : Int, yi : { foo : Int, bar : Int, baz : Int } }
 func = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 }
 """
                         ]
@@ -2751,7 +2751,7 @@ func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
 
 type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
 
-func : { outer : {  yi : { bar : Int, foo : Int, baz : Int } ,er : Int} }
+func : { outer : { yi : { bar : Int, foo : Int, baz : Int } , er : Int} }
 func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
 """
                         , unsortedError
@@ -2761,7 +2761,7 @@ func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
 
 type alias A = { outer : { yi : { foo : Int, bar : Int, baz : Int }, er : Int } }
 
-func : { outer : { er : Int, yi : {  foo : Int,bar : Int, baz : Int } } }
+func : { outer : { er : Int, yi : { foo : Int, bar : Int, baz : Int } } }
 func = { outer = { yi = { foo = 1, bar = 2, baz = 3 }, er = 1 } }
 """
                         ]
@@ -2783,7 +2783,7 @@ func = { yi = (0, []), er = 1 }
 
 type alias A = { yi : ( Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
 
-func : { yi : (Int, List {  foo : Int,bar : Int, baz : Int }), er : Int }
+func : { yi : (Int, List { foo : Int, bar : Int, baz : Int }), er : Int }
 func = { yi = (0, []), er = 1 }
 """
                         ]
