@@ -280,31 +280,6 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
         indexed : List (Graph.Node { a | range : Range })
         indexed =
             List.indexedMap (\i d -> { id = i, label = d }) ds
-
-        eliminateCycles : Graph { a | range : Range } Int -> AcyclicGraph { a | range : Range } Int
-        eliminateCycles g =
-            -- Check if it is acyclic
-            Graph.stronglyConnectedComponents g
-                |> ResultX.extract
-                    -- If not, get all edges between strongly-connected nodes
-                    (List.concatMap Graph.edges
-                        -- Group them by priority
-                        >> DictX.groupBy .label
-                        >> Dict.values
-                        -- Select lowest priority edges
-                        >> ListX.last
-                        >> Maybe.withDefault []
-                        >> List.map (\{ from, to } -> ( from, to ))
-                        >> Set.fromList
-                        -- Eliminate edges and rebuild graph
-                        >> (\toRemove ->
-                                Graph.edges g
-                                    |> List.filter (\{ from, to } -> not <| Set.member ( from, to ) toRemove)
-                                    |> Graph.fromNodesAndEdges indexed
-                                    -- Repeat the process if necessary
-                                    |> eliminateCycles
-                           )
-                    )
     in
     (case orderings of
         [ o ] ->
@@ -322,7 +297,7 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
             -- ignoring lower priority sorts first.
             genEdges os indexed
                 |> Graph.fromNodesAndEdges indexed
-                |> eliminateCycles
+                |> eliminateCycles indexed
                 |> Graph.topologicalSort
                 |> List.map .node
     )
@@ -338,6 +313,68 @@ checkSorting extractSource errorConcerns orderings errorRange ds =
                 else
                     []
            )
+
+
+{-| Given a graph with edges labeled by priority (larger number is lower
+priority, convert it to an acyclic graph by removing edges, with the guarantee
+that all lower-priority edges will be removed before any of higher priority
+are.
+-}
+eliminateCycles : List (Graph.Node a) -> Graph a Int -> AcyclicGraph a Int
+eliminateCycles nodes g =
+    -- Check if it is acyclic
+    Graph.stronglyConnectedComponents g
+        |> ResultX.extract
+            (List.map
+                -- If not, for each strongly-connected subgraph
+                (\graph ->
+                    let
+                        ns : List (Graph.Node a)
+                        ns =
+                            Graph.nodes graph
+
+                        ( lowestPriorityEdges, higherPriorityEdges ) =
+                            -- Get all edges
+                            Graph.edges graph
+                                -- Group them by priority
+                                |> DictX.groupBy .label
+                                |> Dict.values
+                                -- Select lowest priority edges
+                                |> ListX.unconsLast
+                                |> Maybe.withDefault ( [], [] )
+                                |> Tuple.mapBoth
+                                    (List.map (\{ from, to } -> ( from, to ))
+                                        >> Set.fromList
+                                    )
+                                    List.concat
+                    in
+                    Set.filter
+                        -- Filter low priority edges by removing any that by the insertion of just that edge create a cyclic subgraph
+                        (\( from, to ) ->
+                            Graph.fromNodesAndEdges ns ({ from = from, to = to, label = -1 } :: higherPriorityEdges)
+                                |> Graph.checkAcyclic
+                                |> ResultX.isErr
+                        )
+                        lowestPriorityEdges
+                        |> (\s ->
+                                if Set.isEmpty s then
+                                    -- Don't risk the infinite loop and delete them all if none of them appeared cyclic individually
+                                    lowestPriorityEdges
+
+                                else
+                                    s
+                           )
+                )
+                >> List.foldl Set.union Set.empty
+                -- Eliminate all identified edges and rebuild graph
+                >> (\toRemove ->
+                        Graph.edges g
+                            |> List.filter (\{ from, to } -> not <| Set.member ( from, to ) toRemove)
+                            |> Graph.fromNodesAndEdges nodes
+                            -- Repeat the process if necessary
+                            |> eliminateCycles nodes
+                   )
+            )
 
 
 {-| Generate edges for every pairwise combination of nodes, along with their
@@ -437,7 +474,7 @@ checkSortingWithGlue extractSource errorConcerns orderings errorRange ds =
                         |> fallbackCompareFor (compareByOrderings orderings d1.label d2.label)
                 )
 
-        glueLevel : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) -> List (List (NodeContext { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } ())) -> List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
+        glueLevel : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range }) -> List (List (NodeContext { a | namesBound : Set String, glued : Maybe GluedTo, range : Range } Int)) -> List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo, range : Range })
         glueLevel sorted glued =
             case glued of
                 [] ->
@@ -554,7 +591,7 @@ isGluedBefore g =
 it to a directed acyclic graph, where edges indicate gluing dependencies (i.e.
 A -> B means B is glued to A).
 -}
-gluedListToDAG : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo }) -> AcyclicGraph { a | namesBound : Set String, glued : Maybe GluedTo } ()
+gluedListToDAG : List (Graph.Node { a | namesBound : Set String, glued : Maybe GluedTo }) -> AcyclicGraph { a | namesBound : Set String, glued : Maybe GluedTo } Int
 gluedListToDAG ds =
     let
         namesToNodeId : Dict String Int
@@ -562,7 +599,7 @@ gluedListToDAG ds =
             List.concatMap (\{ id, label } -> List.map (\n -> ( n, id )) <| Set.toList label.namesBound) ds
                 |> Dict.fromList
 
-        edges : List (Edge ())
+        edges : List (Edge Int)
         edges =
             -- There can be duplicate edges, but that is fine, since the graph only keeps one
             List.concatMap
@@ -571,34 +608,13 @@ gluedListToDAG ds =
                         |> List.filterMap
                             (\n ->
                                 Dict.get n namesToNodeId
-                                    |> Maybe.map (\from -> { from = from, to = id, label = () })
+                                    |> Maybe.map (\from -> { from = from, to = id, label = 0 })
                             )
                 )
                 ds
-
-        eliminateCycles : Graph { a | namesBound : Set String, glued : Maybe GluedTo } () -> AcyclicGraph { a | namesBound : Set String, glued : Maybe GluedTo } ()
-        eliminateCycles g =
-            -- Check if it is acyclic
-            Graph.stronglyConnectedComponents g
-                |> ResultX.extract
-                    -- If not, get all edges between strongly-connected nodes
-                    (List.concatMap (List.map (\{ from, to } -> ( from, to )) << Graph.edges)
-                        >> Set.fromList
-                        >> (\toRemove ->
-                                -- Eliminate edges and rebuild graph
-                                Graph.edges g
-                                    |> List.map (\{ from, to } -> ( from, to ))
-                                    |> Set.fromList
-                                    |> (\initEdges -> Set.diff initEdges toRemove)
-                                    |> Set.toList
-                                    |> List.map (\( from, to ) -> { from = from, to = to, label = () })
-                                    |> Graph.fromNodesAndEdges ds
-                                    |> eliminateCycles
-                           )
-                    )
     in
     Graph.fromNodesAndEdges ds edges
-        |> eliminateCycles
+        |> eliminateCycles ds
 
 
 {-| Find all dependencies of a declaration.
