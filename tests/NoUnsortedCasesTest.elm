@@ -18,7 +18,98 @@ import Test exposing (Test, describe, test)
 all : Test
 all =
     describe "NoUnsortedCases"
-        [ passes, fails ]
+        [ passes, fails, bugs ]
+
+
+bugs : Test
+bugs =
+    describe "correctly handles"
+        [ test "does not unstably sort patterns (1)" <|
+            \() ->
+                """module A exposing (..)
+
+
+type Foo
+    = A
+    | B
+
+
+a =
+    case ( x, y, z ) of
+        ( _, False, Just B ) ->
+            0
+
+        ( _, False, Nothing ) ->
+            1
+
+        ( True, True, Just A ) ->
+            2
+
+        ( _, True, _ ) ->
+            3
+
+        _ ->
+            4
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "does not unstably sort patterns (2)" <|
+            \() ->
+                """module A exposing (..)
+
+
+type Foo
+    = A
+    | B
+
+
+a =
+    case ( x, y, z ) of
+        ( _, False, Nothing ) ->
+            1
+
+        ( _, False, Just B ) ->
+            0
+
+        ( True, True, Just A ) ->
+            2
+
+        ( _, True, _ ) ->
+            3
+
+        _ ->
+            4
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+
+type Foo
+    = A
+    | B
+
+
+a =
+    case ( x, y, z ) of
+        ( _, False, Just B ) ->
+            0
+
+        ( _, False, Nothing ) ->
+            1
+
+        ( True, True, Just A ) ->
+            2
+
+        ( _, True, _ ) ->
+            3
+
+        _ ->
+            4
+"""
+                        ]
+        ]
 
 
 passes : Test
