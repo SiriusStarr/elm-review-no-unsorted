@@ -829,20 +829,20 @@ constructorIsExposed es constructor { customTypeName } =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor metadata projectContext ->
+        (\lookupTable sourceCodeExtractor moduleName projectContext ->
             { aliases = projectContext.aliases
             , canonicalRecords = projectContext.canonicalRecords
             , constructors = projectContext.constructors
             , functionTypes = projectContext.functionTypes
             , exposingList = Nothing
-            , currentModule = Rule.moduleNameFromMetadata metadata
+            , currentModule = moduleName
             , lookupTable = lookupTable
             , extractSource = sourceCodeExtractor
             }
         )
         |> Rule.withModuleNameLookupTable
         |> Rule.withSourceCodeExtractor
-        |> Rule.withMetadata
+        |> Rule.withModuleName
 
 
 {-| Combine `ProjectContext`s by taking the union of known type info.

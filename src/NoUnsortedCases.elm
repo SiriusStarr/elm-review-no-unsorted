@@ -673,15 +673,15 @@ initialProjectContext =
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
-        (\metadata moduleContext ->
+        (\moduleName moduleContext ->
             { customTypes =
                 moduleContext.customTypes
                     |> Dict.get []
                     |> Maybe.withDefault Dict.empty
-                    |> Dict.singleton (Rule.moduleNameFromMetadata metadata)
+                    |> Dict.singleton moduleName
             }
         )
-        |> Rule.withMetadata
+        |> Rule.withModuleName
 
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
@@ -689,16 +689,16 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable extractSource metadata projectContext ->
+        (\lookupTable extractSource moduleName projectContext ->
             { customTypes = projectContext.customTypes
             , lookupTable = lookupTable
-            , moduleName = String.join "." <| Rule.moduleNameFromMetadata metadata
+            , moduleName = String.join "." moduleName
             , extractSource = extractSource
             }
         )
         |> Rule.withModuleNameLookupTable
         |> Rule.withSourceCodeExtractor
-        |> Rule.withMetadata
+        |> Rule.withModuleName
 
 
 {-| Combine `ProjectContext`s by taking the union of known type orders.
