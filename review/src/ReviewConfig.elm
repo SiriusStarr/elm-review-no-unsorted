@@ -16,6 +16,7 @@ import Docs.NoMissing exposing (allModules, everything)
 import Docs.ReviewAtDocs
 import Docs.ReviewLinksAndSections
 import Docs.UpToDateReadmeLinks
+import NoConfusingPrefixOperator
 import NoDebug.Log
 import NoDebug.TodoOrToString
 import NoExposingEverything
@@ -30,7 +31,6 @@ import NoUnused.CustomTypeConstructorArgs
 import NoUnused.CustomTypeConstructors
 import NoUnused.Dependencies
 import NoUnused.Exports
-import NoUnused.Modules
 import NoUnused.Parameters
 import NoUnused.Patterns
 import NoUnused.Variables
@@ -50,6 +50,7 @@ config =
         -- TLD rule has `@docs` in its examples
         |> Rule.ignoreErrorsForFiles [ "src/NoUnsortedTopLevelDeclarations.elm" ]
     , Docs.UpToDateReadmeLinks.rule
+    , NoConfusingPrefixOperator.rule
     , NoDebug.Log.rule
     , NoDebug.TodoOrToString.rule
         |> Rule.ignoreErrorsForDirectories [ "tests/" ]
@@ -65,10 +66,9 @@ config =
     , NoUnused.CustomTypeConstructorArgs.rule
     , NoUnused.Dependencies.rule
     , NoUnused.Exports.rule
-    , NoUnused.Modules.rule
     , NoUnused.Parameters.rule
     , NoUnused.Patterns.rule
     , NoUnused.Variables.rule
     , Simplify.rule Simplify.defaults
-    , CognitiveComplexity.rule 10
+    , CognitiveComplexity.rule 15
     ]
