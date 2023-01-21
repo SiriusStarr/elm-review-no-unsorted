@@ -171,6 +171,7 @@ rule (RuleConfig r) =
                 , c
                 )
             )
+        |> Rule.providesFixesForModuleRule
         |> Rule.fromModuleRuleSchema
 
 
