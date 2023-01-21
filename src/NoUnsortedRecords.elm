@@ -1157,7 +1157,7 @@ makeSubrecordsFromType recurse namePrefix type_ =
         go : Maybe String -> Type -> List ( String, KnownRecord )
         go s =
             if recurse then
-                makeSubrecordsFromType recurse (MaybeX.unwrap namePrefix ((++) namePrefix) s)
+                makeSubrecordsFromType recurse (MaybeX.unwrap namePrefix (\subRec -> namePrefix ++ subRec) s)
 
             else
                 always []
@@ -1538,7 +1538,7 @@ checkFunctionDeclaration config local func =
     in
     Maybe.map (checkTypeAnnotation config local.context Nothing << .typeAnnotation << Node.value) func.signature
         |> Maybe.withDefault []
-        |> (++) (checkFunctionArgsAndExpr config local hasType arguments expression)
+        |> (\errsInAnnot -> errsInAnnot ++ checkFunctionArgsAndExpr config local hasType arguments expression)
 
 
 {-| Get the name and type of a function, if possible.

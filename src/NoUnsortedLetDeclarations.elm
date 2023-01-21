@@ -803,8 +803,8 @@ expressionVisitor (RuleConfig { glues, sortBy }) n context =
                             ( (\es ->
                                 { range = Node.range d
                                 , namesBound = Set.fromList bs
-                                , usedInExpression = List.any ((<) 0 << countUsesIn lb.expression) bs
-                                , usedInOtherDecs = List.any (\e -> List.any ((<) 0 << countUsesIn e) bs) es
+                                , usedInExpression = List.any ((\numUses -> numUses > 0) << countUsesIn lb.expression) bs
+                                , usedInOtherDecs = List.any (\e -> List.any ((\numUses -> numUses > 0) << countUsesIn e) bs) es
                                 , args = []
                                 , glued = Nothing
                                 , dependentOnBindings = findAllNamesIn expression
@@ -818,7 +818,7 @@ expressionVisitor (RuleConfig { glues, sortBy }) n context =
                 applyGlues ds i d =
                     { d | glued = ListX.findMap (\g -> g ( i, d ) ds) glues }
             in
-            ListX.reverseMap ((|>) exprs) exprsToDecs
+            ListX.reverseMap (\f -> f exprs) exprsToDecs
                 |> (\ds -> List.indexedMap (applyGlues ds) ds)
                 |> checkSortingWithGlue context.extractSource "Let declarations" sortBy errorRange
 
