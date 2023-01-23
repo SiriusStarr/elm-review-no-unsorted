@@ -563,6 +563,7 @@ type alias ModuleContext =
                 , declarationOrder : List String
                 }
             )
+    , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
     , moduleName : String
     , extractSource : Range -> String
@@ -657,7 +658,14 @@ moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema schemaState ModuleContext ->
 moduleVisitor config schema =
     schema
         |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
-        |> Rule.withExpressionEnterVisitor (\e c -> ( expressionVisitor config e c, c ))
+        |> Rule.withExpressionEnterVisitor
+            (\e c ->
+                if c.fileIsIgnored then
+                    ( [], c )
+
+                else
+                    ( expressionVisitor config e c, c )
+            )
 
 
 {-| The initial project context knows of no types.
@@ -689,8 +697,9 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable extractSource moduleName projectContext ->
+        (\lookupTable extractSource moduleName fileIsIgnored projectContext ->
             { customTypes = projectContext.customTypes
+            , fileIsIgnored = fileIsIgnored
             , lookupTable = lookupTable
             , moduleName = String.join "." moduleName
             , extractSource = extractSource
@@ -699,6 +708,7 @@ fromProjectToModule =
         |> Rule.withModuleNameLookupTable
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleName
+        |> Rule.withIsFileIgnored
 
 
 {-| Combine `ProjectContext`s by taking the union of known type orders.

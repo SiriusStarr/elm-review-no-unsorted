@@ -701,6 +701,7 @@ type alias ModuleContext =
     , functionTypes : Dict ModuleName (Dict String Type)
     , currentModule : ModuleName
     , exposingList : Maybe Exposing
+    , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
     , extractSource : Range -> String
     }
@@ -723,7 +724,14 @@ moduleVisitor config schema =
     schema
         |> Rule.withModuleDefinitionVisitor (\m context -> ( [], { context | exposingList = Just <| exposingList <| Node.value m } ))
         |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config c ds ))
-        |> Rule.withDeclarationEnterVisitor (\d c -> ( declarationEnterVisitor config c d, c ))
+        |> Rule.withDeclarationEnterVisitor
+            (\d c ->
+                if c.fileIsIgnored then
+                    ( [], c )
+
+                else
+                    ( declarationEnterVisitor config c d, c )
+            )
 
 
 {-| The initial project context knows of no types.
@@ -829,12 +837,13 @@ constructorIsExposed es constructor { customTypeName } =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor moduleName projectContext ->
+        (\lookupTable sourceCodeExtractor moduleName fileIsIgnored projectContext ->
             { aliases = projectContext.aliases
             , canonicalRecords = projectContext.canonicalRecords
             , constructors = projectContext.constructors
             , functionTypes = projectContext.functionTypes
             , exposingList = Nothing
+            , fileIsIgnored = fileIsIgnored
             , currentModule = moduleName
             , lookupTable = lookupTable
             , extractSource = sourceCodeExtractor
@@ -843,6 +852,7 @@ fromProjectToModule =
         |> Rule.withModuleNameLookupTable
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleName
+        |> Rule.withIsFileIgnored
 
 
 {-| Combine `ProjectContext`s by taking the union of known type info.
