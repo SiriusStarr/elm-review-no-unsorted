@@ -61,7 +61,7 @@ import Elm.Docs
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Exposing exposing (Exposing(..), TopLevelExpose(..))
 import Elm.Syntax.Expression exposing (Expression(..), Function, LetDeclaration(..), RecordSetter)
-import Elm.Syntax.Module exposing (exposingList)
+import Elm.Syntax.Module as Module
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
@@ -700,7 +700,7 @@ type alias ModuleContext =
     , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
     , functionTypes : Dict ModuleName (Dict String Type)
     , currentModule : ModuleName
-    , exposingList : Maybe Exposing
+    , exposingList : Exposing
     , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
     , extractSource : Range -> String
@@ -722,7 +722,6 @@ checking all expressions for records.
 moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema r ModuleContext -> Rule.ModuleRuleSchema { r | hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withModuleDefinitionVisitor (\m context -> ( [], { context | exposingList = Just <| exposingList <| Node.value m } ))
         |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config c ds ))
         |> Rule.withDeclarationEnterVisitor
             (\d c ->
@@ -755,17 +754,12 @@ fromModuleToProject =
         filterUnexposed context isExposed =
             Dict.update context.currentModule
                 (Maybe.map
-                    (Maybe.map
-                        (\exposed ->
-                            case exposed of
-                                All _ ->
-                                    identity
+                    (case context.exposingList of
+                        All _ ->
+                            identity
 
-                                Explicit es ->
-                                    Dict.filter (isExposed es)
-                        )
-                        context.exposingList
-                        |> Maybe.withDefault identity
+                        Explicit es ->
+                            Dict.filter (isExposed es)
                     )
                 )
     in
@@ -837,12 +831,12 @@ constructorIsExposed es constructor { customTypeName } =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor moduleName fileIsIgnored projectContext ->
+        (\lookupTable sourceCodeExtractor moduleName fileIsIgnored { moduleDefinition } projectContext ->
             { aliases = projectContext.aliases
             , canonicalRecords = projectContext.canonicalRecords
             , constructors = projectContext.constructors
             , functionTypes = projectContext.functionTypes
-            , exposingList = Nothing
+            , exposingList = Module.exposingList <| Node.value moduleDefinition
             , fileIsIgnored = fileIsIgnored
             , currentModule = moduleName
             , lookupTable = lookupTable
@@ -853,6 +847,7 @@ fromProjectToModule =
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleName
         |> Rule.withIsFileIgnored
+        |> Rule.withFullAst
 
 
 {-| Combine `ProjectContext`s by taking the union of known type info.
