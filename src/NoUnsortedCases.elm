@@ -21,7 +21,9 @@ import Dict exposing (Dict)
 import Dict.Extra as DictX
 import Elm.Docs
 import Elm.Syntax.Declaration as Declaration exposing (Declaration)
+import Elm.Syntax.Exposing exposing (Exposing(..), TopLevelExpose(..))
 import Elm.Syntax.Expression as Expression exposing (Expression)
+import Elm.Syntax.Module as Module exposing (Module)
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern as Pattern exposing (Pattern)
@@ -33,7 +35,7 @@ import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable, moduleNameF
 import Review.Project.Dependency as Dependency exposing (Dependency)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
-import Util exposing (checkSorting, fallbackCompareFor, fallbackCompareWithUnsortableFor, validate)
+import Util exposing (checkSorting, fallbackCompareFor, fallbackCompareWithUnsortableFor)
 
 
 {-| Reports case patterns that are not in the "proper" order.
@@ -212,7 +214,7 @@ rule config =
         |> Rule.withDependenciesProjectVisitor (\d c -> ( [], dependencyVisitor config d c ))
         |> Rule.withModuleVisitor (moduleVisitor config)
         |> Rule.withModuleContextUsingContextCreator
-            { fromProjectToModule = fromProjectToModule
+            { fromProjectToModule = fromProjectToModule config
             , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
@@ -552,6 +554,14 @@ type alias ProjectContext =
 
 {-| The module context, consisting of a map from module names to a map of type
 names to orders.
+
+  - `customTypes` -- Orderings of all known custom types.
+  - `exposedCustomTypes` -- All custom type orders that are exposed from local
+    module.
+  - `fileIsIgnored` -- Whether file should not be checked for errors
+  - `lookupTable` -- Module name lookup table
+  - `extractSourceCode` -- Source extractor for fixes
+
 -}
 type alias ModuleContext =
     { customTypes :
@@ -563,6 +573,12 @@ type alias ModuleContext =
                 , declarationOrder : List String
                 }
             )
+    , exposedCustomTypes :
+        Dict
+            String
+            { constructors : Set String
+            , declarationOrder : List String
+            }
     , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
     , extractSource : Range -> String
@@ -656,7 +672,6 @@ checking all expressions for `case`s.
 moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema schemaState ModuleContext -> Rule.ModuleRuleSchema { schemaState | hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
         |> Rule.withExpressionEnterVisitor
             (\e c ->
                 if c.fileIsIgnored then
@@ -681,11 +696,7 @@ fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
         (\moduleName moduleContext ->
-            { customTypes =
-                moduleContext.customTypes
-                    |> Dict.get []
-                    |> Maybe.withDefault Dict.empty
-                    |> Dict.singleton moduleName
+            { customTypes = Dict.singleton moduleName moduleContext.exposedCustomTypes
             }
         )
         |> Rule.withModuleName
@@ -693,12 +704,22 @@ fromModuleToProject =
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
 -}
-fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
-fromProjectToModule =
+fromProjectToModule : RuleConfig -> Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule config =
     Rule.initContextCreator
-        (\lookupTable extractSource moduleName fileIsIgnored projectContext ->
-            { customTypes = projectContext.customTypes
+        (\lookupTable extractSource moduleName fileIsIgnored { declarations, moduleDefinition } projectContext ->
+            let
+                { exposedCustomTypes, customTypes } =
+                    declarationListVisitor config
+                        declarations
+                        { moduleName = String.join "." moduleName
+                        , exposedTypes = getExposedTypes <| Node.value moduleDefinition
+                        , customTypes = projectContext.customTypes
+                        }
+            in
+            { customTypes = customTypes
             , fileIsIgnored = fileIsIgnored
+            , exposedCustomTypes = exposedCustomTypes
             , lookupTable = lookupTable
             , extractSource = extractSource
             }
@@ -707,6 +728,35 @@ fromProjectToModule =
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleName
         |> Rule.withIsFileIgnored
+        |> Rule.withFullAst
+
+
+{-| Get a set of all types with exposed constructors or `Nothing` if everything
+is exposed.
+-}
+getExposedTypes : Module -> Maybe (Set String)
+getExposedTypes =
+    let
+        keepTypesWithExposedConstructors : Node TopLevelExpose -> Maybe String
+        keepTypesWithExposedConstructors e =
+            case Node.value e of
+                TypeExpose { name } ->
+                    Just name
+
+                _ ->
+                    Nothing
+    in
+    Module.exposingList
+        >> (\l ->
+                case l of
+                    All _ ->
+                        Nothing
+
+                    Explicit es ->
+                        List.filterMap keepTypesWithExposedConstructors es
+                            |> Set.fromList
+                            |> Just
+           )
 
 
 {-| Combine `ProjectContext`s by taking the union of known type orders.
@@ -785,21 +835,52 @@ dependencyVisitor (RuleConfig config) deps context =
         context
 
 
-
--- * DECLARATION LIST VISITOR
-
-
 {-| Visit declarations, storing custom type orders.
 -}
-declarationListVisitor : RuleConfig -> List (Node Declaration) -> ModuleContext -> ModuleContext
-declarationListVisitor (RuleConfig config) declarations context =
+declarationListVisitor :
+    RuleConfig
+    -> List (Node Declaration)
+    ->
+        { moduleName : String
+        , exposedTypes : Maybe (Set String)
+        , customTypes :
+            Dict
+                ModuleName
+                (Dict
+                    String
+                    { constructors : Set String
+                    , declarationOrder : List String
+                    }
+                )
+        }
+    ->
+        { customTypes :
+            Dict
+                ModuleName
+                (Dict
+                    String
+                    { constructors : Set String
+                    , declarationOrder : List String
+                    }
+                )
+        , exposedCustomTypes :
+            Dict
+                String
+                { constructors : Set String
+                , declarationOrder : List String
+                }
+        }
+declarationListVisitor (RuleConfig config) declarations { moduleName, exposedTypes, customTypes } =
     let
-        getCustomType : Node Declaration -> Maybe Type
+        getCustomType : Node Declaration -> Maybe ( String, { constructors : Set String, declarationOrder : List String } )
         getCustomType node =
             case Node.value node of
                 Declaration.CustomTypeDeclaration ({ name } as type_) ->
-                    if config.sortablePredicate context.moduleName (Node.value name) then
-                        Just type_
+                    if config.sortablePredicate moduleName (Node.value name) then
+                        Just
+                            ( Node.value type_.name
+                            , typeConstructors type_
+                            )
 
                     else
                         Nothing
@@ -817,24 +898,23 @@ declarationListVisitor (RuleConfig config) declarations context =
                         }
                    )
     in
-    -- Find custom types that were defined in the module, and store them in the context.
-    { context
-        | customTypes =
-            List.filterMap getCustomType declarations
-                |> List.map
-                    (\type_ ->
-                        ( Node.value type_.name
-                        , typeConstructors type_
-                        )
-                    )
-                |> validate (not << List.isEmpty)
-                |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.customTypes (\v -> Dict.insert [] v context.customTypes)
-    }
+    -- Find custom types that were defined in the module
+    List.filterMap getCustomType declarations
+        |> (\ts ->
+                if List.isEmpty ts then
+                    { customTypes = customTypes
+                    , exposedCustomTypes = Dict.empty
+                    }
 
-
-
--- * EXPRESSION VISITOR
+                else
+                    { customTypes =
+                        Dict.fromList ts
+                            |> (\v -> Dict.insert [] v customTypes)
+                    , exposedCustomTypes =
+                        List.filter (\( typeName, _ ) -> MaybeX.unwrap True (Set.member typeName) exposedTypes) ts
+                            |> Dict.fromList
+                    }
+           )
 
 
 {-| Visit all expressions in a module, checking for `case`s and ensuring those
