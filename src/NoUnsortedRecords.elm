@@ -1588,7 +1588,7 @@ subrecords (if `Just True`) found are in canonical order, and a `Dict` of
 positional type variables, convert a `TypeAnnotation` into a
 `TypeWithPositionalVars`.
 -}
-typeAnnotToTypeWithPositionalVars : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> List String -> Node TypeAnnotation -> TypeWithPositionalVars
+typeAnnotToTypeWithPositionalVars : { context | moduleName : ModuleName, lookupTable : ModuleNameLookupTable } -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> List String -> Node TypeAnnotation -> TypeWithPositionalVars
 typeAnnotToTypeWithPositionalVars context settings typeArgs =
     typeAnnotToType context settings
         >> DereferencedType
@@ -1601,7 +1601,7 @@ typeAnnotToTypeWithPositionalVars context settings typeArgs =
 `RecordDefinition`/whether the record is generic, generate all `KnownRecord`s
 from a type annotation.
 -}
-knownRecordFromTypeAnnot : SubrecordCanonicity -> ModuleContext -> ( RecordDefinition, Bool ) -> List ( String, KnownRecord )
+knownRecordFromTypeAnnot : SubrecordCanonicity -> { context | moduleName : ModuleName, lookupTable : ModuleNameLookupTable } -> ( RecordDefinition, Bool ) -> List ( String, KnownRecord )
 knownRecordFromTypeAnnot subrecordTreatment context ( fields, isGeneric ) =
     ListX.indexedFoldl
         (\i field ->
@@ -1639,7 +1639,7 @@ knownRecordFromTypeAnnot subrecordTreatment context ( fields, isGeneric ) =
 
 {-| Wrapper for `typeAnnotToType` when not dealing with aliases.
 -}
-typeAnnotToNoncanonicalType : ModuleContext -> Node TypeAnnotation -> Type
+typeAnnotToNoncanonicalType : { context | moduleName : ModuleName, lookupTable : ModuleNameLookupTable } -> Node TypeAnnotation -> Type
 typeAnnotToNoncanonicalType context =
     typeAnnotToType context
         { constrainedTypeVarsAreRespected = True
@@ -1651,7 +1651,7 @@ typeAnnotToNoncanonicalType context =
 subrecords (if `Just True`) found are in canonical order, convert a
 `TypeAnnotation` into a `Type`.
 -}
-typeAnnotToType : ModuleContext -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> Node TypeAnnotation -> Type
+typeAnnotToType : { context | moduleName : ModuleName, lookupTable : ModuleNameLookupTable } -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> Node TypeAnnotation -> Type
 typeAnnotToType context ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanonical } as settings) annot =
     let
         go : Node TypeAnnotation -> Type
