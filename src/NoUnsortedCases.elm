@@ -565,7 +565,6 @@ type alias ModuleContext =
             )
     , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
-    , moduleName : String
     , extractSource : Range -> String
     }
 
@@ -701,7 +700,6 @@ fromProjectToModule =
             { customTypes = projectContext.customTypes
             , fileIsIgnored = fileIsIgnored
             , lookupTable = lookupTable
-            , moduleName = String.join "." moduleName
             , extractSource = extractSource
             }
         )
