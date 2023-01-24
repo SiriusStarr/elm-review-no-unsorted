@@ -695,8 +695,13 @@ initialProjectContext =
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
-        (\moduleName moduleContext ->
-            { customTypes = Dict.singleton moduleName moduleContext.exposedCustomTypes
+        (\moduleName { exposedCustomTypes } ->
+            { customTypes =
+                if Dict.isEmpty exposedCustomTypes then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposedCustomTypes
             }
         )
         |> Rule.withModuleName
