@@ -699,7 +699,7 @@ type alias ModuleContext =
     , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
     , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
     , functionTypes : Dict ModuleName (Dict String Type)
-    , currentModule : ModuleName
+    , moduleName : ModuleName
     , exposingList : Exposing
     , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
@@ -752,7 +752,7 @@ fromModuleToProject =
     let
         filterUnexposed : ModuleContext -> (List (Node TopLevelExpose) -> String -> a -> Bool) -> Dict ModuleName (Dict String a) -> Dict ModuleName (Dict String a)
         filterUnexposed context isExposed =
-            Dict.update context.currentModule
+            Dict.update context.moduleName
                 (Maybe.map
                     (case context.exposingList of
                         All _ ->
@@ -838,7 +838,7 @@ fromProjectToModule =
             , functionTypes = projectContext.functionTypes
             , exposingList = Module.exposingList <| Node.value moduleDefinition
             , fileIsIgnored = fileIsIgnored
-            , currentModule = moduleName
+            , moduleName = moduleName
             , lookupTable = lookupTable
             , extractSource = sourceCodeExtractor
             }
@@ -1107,8 +1107,8 @@ of positional type vars, convert an `Elm.Type.Type` to a
 `TypeWithPositionalVars`.
 -}
 docTypeToTypeWithPositionalVars : ModuleName -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> List String -> Elm.Type.Type -> TypeWithPositionalVars
-docTypeToTypeWithPositionalVars currentModule settings typeArgs =
-    docTypeToType currentModule settings
+docTypeToTypeWithPositionalVars moduleName settings typeArgs =
+    docTypeToType moduleName settings
         >> DereferencedType
         >> assignTypeVars (makePositionalArgTypeVars typeArgs)
         >> getType
@@ -1120,12 +1120,12 @@ fields/whether the record is generic, generate all `KnownRecord`s from a
 `Elm.Type.Type`.
 -}
 knownRecordFromDocType : SubrecordCanonicity -> ModuleName -> ( List ( String, Elm.Type.Type ), Bool ) -> List ( String, KnownRecord )
-knownRecordFromDocType subrecordTreatment currentModule ( fields, isGeneric ) =
+knownRecordFromDocType subrecordTreatment moduleName ( fields, isGeneric ) =
     ListX.indexedFoldl
         (\i ( f, t ) ->
             Dict.insert f
                 ( i
-                , docTypeToType currentModule
+                , docTypeToType moduleName
                     { -- Constrained type vars don't apply to type aliases
                       constrainedTypeVarsAreRespected = False
 
@@ -1208,13 +1208,13 @@ makeSubrecordsFromType recurse namePrefix type_ =
 `Elm.Type.Type` to a `Type`.
 -}
 docTypeToType : ModuleName -> { constrainedTypeVarsAreRespected : Bool, subrecordIsAlsoCanonical : Maybe Bool } -> Elm.Type.Type -> Type
-docTypeToType currentModule ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanonical } as settings) type_ =
+docTypeToType moduleName ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanonical } as settings) type_ =
     let
         go : Elm.Type.Type -> Type
         go =
             MaybeX.filter identity subrecordIsAlsoCanonical
                 |> (\subrecordStillCanon ->
-                        docTypeToType currentModule { settings | subrecordIsAlsoCanonical = subrecordStillCanon }
+                        docTypeToType moduleName { settings | subrecordIsAlsoCanonical = subrecordStillCanon }
                    )
 
         makeList : ModuleName -> String -> List Elm.Type.Type -> Maybe Type
@@ -1240,12 +1240,12 @@ docTypeToType currentModule ({ constrainedTypeVarsAreRespected, subrecordIsAlsoC
                 |> Maybe.map
                     (\( n, m ) ->
                         if m == [] then
-                            ( currentModule, n )
+                            ( moduleName, n )
 
                         else
                             ( m, n )
                     )
-                |> Maybe.withDefault ( currentModule, qualified )
+                |> Maybe.withDefault ( moduleName, qualified )
                 |> (\( mod, name ) ->
                         makeList mod name args
                             |> MaybeX.withDefaultLazy (\() -> NamedType ( mod, name ) <| List.map go args)
@@ -1499,20 +1499,20 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
             List.filterMap (Maybe.map makeAliasInfo << getAlias) declarations
                 |> validate (not << List.isEmpty)
                 |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.aliases (\v -> Dict.insert context.currentModule v context.aliases)
+                |> MaybeX.unwrap context.aliases (\v -> Dict.insert context.moduleName v context.aliases)
         , canonicalRecords =
             validate (not << List.isEmpty) newRecords
                 |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.canonicalRecords (\v -> Dict.insert context.currentModule v context.canonicalRecords)
+                |> MaybeX.unwrap context.canonicalRecords (\v -> Dict.insert context.moduleName v context.canonicalRecords)
         , constructors =
             validate (not << List.isEmpty) newConstructors
                 |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.constructors (\v -> Dict.insert context.currentModule v context.constructors)
+                |> MaybeX.unwrap context.constructors (\v -> Dict.insert context.moduleName v context.constructors)
         , functionTypes =
             List.filterMap getFunctionsFromDeclaration declarations
                 |> validate (not << List.isEmpty)
                 |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.functionTypes (\v -> Dict.insert context.currentModule v context.functionTypes)
+                |> MaybeX.unwrap context.functionTypes (\v -> Dict.insert context.moduleName v context.functionTypes)
     }
 
 
@@ -1677,7 +1677,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanon
                 |> (\moduleName ->
                         if moduleName == [] then
                             -- If the module name is empty, then update to current module name
-                            context.currentModule
+                            context.moduleName
 
                         else
                             moduleName
@@ -2432,7 +2432,7 @@ findFunctionType { context, localFunctions } type_ moduleNode name =
         |> Maybe.map
             (\moduleName ->
                 if moduleName == [] then
-                    context.currentModule
+                    context.moduleName
 
                 else
                     moduleName
