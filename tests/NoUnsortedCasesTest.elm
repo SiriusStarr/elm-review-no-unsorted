@@ -1139,6 +1139,34 @@ toString custom =
         Baz -> "Baz"
 """
                         ]
+        , test "type is not exposed" <|
+            \() ->
+                """module A exposing (toString)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Bar -> "Bar"
+        Baz -> "Baz"
+        Foo -> "Foo"
+"""
+                    |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (toString)
+
+type Custom = Foo | Bar | Baz
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Foo -> "Foo"
+        Bar -> "Bar"
+        Baz -> "Baz"
+"""
+                        ]
         , fixesProperly
         , failsCrossModule
         , failsWildcards
