@@ -166,6 +166,26 @@ toString custom =
                 ]
                     |> Review.Test.runOnModules (rule defaults)
                     |> Review.Test.expectNoErrors
+        , test "but type is not exported (this is a compile error, just for checking context management)" <|
+            \() ->
+                [ """module A exposing (Custom)
+
+type Custom = Foo | Bar | Baz
+"""
+                , """module B exposing (..)
+
+import A exposing (Custom(..))
+
+toString : Custom -> String
+toString custom =
+    case custom of
+        Bar -> "Bar"
+        Foo -> "Foo"
+        Baz -> "Baz"
+"""
+                ]
+                    |> Review.Test.runOnModules (rule defaults)
+                    |> Review.Test.expectNoErrors
         , test "with qualified names" <|
             \() ->
                 [ """module A exposing (..)
