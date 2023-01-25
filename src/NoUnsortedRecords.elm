@@ -1318,6 +1318,50 @@ makeCustomTypeSubrecords subrecordTreatment n ts =
             )
 
 
+{-| Information on what functions, types/aliases, and fully-exposed types with constructors are exposed by the module.
+-}
+type alias ExposedNames =
+    { functions : Set String
+    , types : Set String
+    , openTypes : Set String
+    }
+
+
+{-| Get a set of all names exposed by the modules or `Nothing` if everything is
+exposed.
+-}
+getExposedNames : Module -> Maybe ExposedNames
+getExposedNames =
+    let
+        step : Node TopLevelExpose -> ExposedNames -> ExposedNames
+        step e acc =
+            case Node.value e of
+                FunctionExpose name ->
+                    { acc | functions = Set.insert name acc.functions }
+
+                TypeExpose { name } ->
+                    { acc | openTypes = Set.insert name acc.openTypes }
+
+                InfixExpose name ->
+                    { acc | functions = Set.insert name acc.functions }
+
+                TypeOrAliasExpose name ->
+                    { acc | types = Set.insert name acc.types }
+    in
+    Module.exposingList
+        >> (\l ->
+                case l of
+                    All _ ->
+                        Nothing
+
+                    Explicit es ->
+                        List.foldl step
+                            { functions = Set.empty, types = Set.empty, openTypes = Set.empty }
+                            es
+                            |> Just
+           )
+
+
 {-| Visit declarations, storing record field orders.
 -}
 declarationListVisitor : RuleConfig -> ModuleContext -> List (Node Declaration) -> ModuleContext
