@@ -1277,18 +1277,6 @@ annotToFields annot =
             Nothing
 
 
-{-| Unwrap a type alias from a declaration (if it is one).
--}
-getAlias : Node Declaration -> Maybe TypeAlias
-getAlias node =
-    case Node.value node of
-        AliasDeclaration alias_ ->
-            Just alias_
-
-        _ ->
-            Nothing
-
-
 {-| Make subrecords for custom types, if appropriate.
 -}
 makeCustomTypeSubrecords : SubrecordCanonicity -> String -> List TypeWithPositionalVars -> List ( String, KnownRecord )
@@ -1364,20 +1352,91 @@ getExposedNames =
 
 {-| Visit declarations, storing record field orders.
 -}
-declarationListVisitor : RuleConfig -> ModuleContext -> List (Node Declaration) -> ModuleContext
+declarationListVisitor :
+    RuleConfig
+    ->
+        { moduleName : ModuleName
+        , lookupTable : ModuleNameLookupTable
+        , aliases : Dict ModuleName (Dict String TypeWithPositionalVars)
+        , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
+        , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
+        , functionTypes : Dict ModuleName (Dict String Type)
+        , exposingList : Maybe ExposedNames
+        , fileIsIgnored : Bool
+        }
+    -> List (Node Declaration)
+    ->
+        { aliases : Dict ModuleName (Dict String TypeWithPositionalVars)
+        , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
+        , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
+        , functionTypes : Dict ModuleName (Dict String Type)
+        , exposed :
+            { aliases : Dict String TypeWithPositionalVars
+            , canonicalRecords : Dict String KnownRecord
+            , constructors : Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars }
+            , functionTypes : Dict String Type
+            }
+        }
 declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations =
-    let
-        makeAliasInfo : TypeAlias -> ( String, TypeWithPositionalVars )
-        makeAliasInfo { name, generics, typeAnnotation } =
-            ( Node.value name
-            , typeAnnotToTypeWithPositionalVars context
-                -- Constrained type vars are not respected for aliases
-                { constrainedTypeVarsAreRespected = False
-                , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
-                }
-                (List.map Node.value generics)
-                typeAnnotation
-            )
+    -- Find aliases, canonical records, and function types and store them
+    List.foldl (accumulateDeclarationInfo subrecordTreatment context)
+        { aliases = []
+        , canonicalRecords = []
+        , constructors = []
+        , functionTypes = []
+        , exposedAliases = []
+        , exposedCanonicalRecords = []
+        , exposedConstructors = []
+        , exposedFunctionTypes = []
+        }
+        declarations
+        |> (\r ->
+                if context.fileIsIgnored then
+                    { aliases = Dict.empty
+                    , canonicalRecords = Dict.empty
+                    , constructors = Dict.empty
+                    , functionTypes = Dict.empty
+                    , exposed =
+                        { aliases =
+                            Dict.fromList r.exposedAliases
+                        , canonicalRecords =
+                            Dict.fromList r.exposedCanonicalRecords
+                        , constructors =
+                            Dict.fromList r.exposedConstructors
+                        , functionTypes =
+                            Dict.fromList r.exposedFunctionTypes
+                        }
+                    }
+
+                else
+                    { aliases =
+                        validate (not << List.isEmpty) r.aliases
+                            |> Maybe.map Dict.fromList
+                            |> MaybeX.unwrap context.aliases (\v -> Dict.insert context.moduleName v context.aliases)
+                    , canonicalRecords =
+                        validate (not << List.isEmpty) r.canonicalRecords
+                            |> Maybe.map Dict.fromList
+                            |> MaybeX.unwrap context.canonicalRecords (\v -> Dict.insert context.moduleName v context.canonicalRecords)
+                    , constructors =
+                        validate (not << List.isEmpty) r.constructors
+                            |> Maybe.map Dict.fromList
+                            |> MaybeX.unwrap context.constructors (\v -> Dict.insert context.moduleName v context.constructors)
+                    , functionTypes =
+                        validate (not << List.isEmpty) r.functionTypes
+                            |> Maybe.map Dict.fromList
+                            |> MaybeX.unwrap context.functionTypes (\v -> Dict.insert context.moduleName v context.functionTypes)
+                    , exposed =
+                        { aliases =
+                            Dict.fromList r.exposedAliases
+                        , canonicalRecords =
+                            Dict.fromList r.exposedCanonicalRecords
+                        , constructors =
+                            Dict.fromList r.exposedConstructors
+                        , functionTypes =
+                            Dict.fromList r.exposedFunctionTypes
+                        }
+                    }
+           )
 
         makeConstructorAndSubrecords : TypeWithPositionalVars -> List (Node String) -> ValueConstructor -> ( String, TypeWithPositionalVars, List ( String, KnownRecord ) )
         makeConstructorAndSubrecords return typeVars { name, arguments } =
