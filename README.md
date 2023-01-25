@@ -6,10 +6,10 @@ rules to ensure that anything (readily) sortable in Elm code is sorted in the
 
 ## Provided rules
 
-* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
-* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
-* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
-* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
+* [🔧`NoUnsortedCases`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedCases/) - Reports case patterns that are not in the "proper" order.
+* [🔧`NoUnsortedLetDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedLetDeclarations/) - Reports `let` declarations that are not in the "proper" order.
+* [🔧`NoUnsortedRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedRecords/) - Reports record fields that are not in the "proper" order.
+* [🔧`NoUnsortedTopLevelDeclarations`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedTopLevelDeclarations/) - Reports top-level declarations that are not in the "proper" order.
 
 ## Configuration
 
@@ -52,6 +52,10 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example
 
 ## Changelog
 
+* `1.1.4`
+  * ⚡️ Improve performance when dealing with ignored files (~10% in one
+    real-world test case).
+  * 🐛 Bump `elm-review` to v2.12.1 for upstream bugfix.
 * `1.1.3` -- Bump `elm-review` to v2.11.1 and mark rule as providing fixes.
 * `1.1.2` -- 🐛 Fix a bug where, when dealing with cyclical sorting conditions,
   some low priority edges associated with the cycle but not actually responsible
@@ -75,18 +79,18 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example
   * **New Features:**
     * ✨ -- Disable typechecking of unambiguous records by `NoUnsortedRecords`.
       The old default can be re-enabled with
-      [`typecheckAllRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedRecords/#typecheckAllRecords)
+      [`typecheckAllRecords`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedRecords/#typecheckAllRecords)
     * ✨ -- Add control over subrecord support for `NoUnsortedRecords`.  Default
       behavior is to sort them when they appear in context (e.g. as part of
       their larger record) but not when they appear alone.  The old behavior did
       this unreliably and also treated custom type argument records as always
       canonical; this **old behavior may be re-enabled** (without the
       unreliability) with
-      [`treatCustomTypeRecordsAsCanonical`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedRecords/#treatCustomTypeRecordsAsCanonical).
+      [`treatCustomTypeRecordsAsCanonical`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedRecords/#treatCustomTypeRecordsAsCanonical).
       New settings for this behavior are also available with
-      [`treatSubrecordsAsUnknown`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedRecords/#treatSubrecordsAsUnknown)
+      [`treatSubrecordsAsUnknown`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedRecords/#treatSubrecordsAsUnknown)
       and
-      [`treatAllSubrecordsAsCanonical`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.3/NoUnsortedRecords/#treatAllSubrecordsAsCanonical).
+      [`treatAllSubrecordsAsCanonical`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-unsorted/1.1.4/NoUnsortedRecords/#treatAllSubrecordsAsCanonical).
   * **Bugfixes:**
     * 🚑 -- Fix critical bug causing control flow to sometimes be altered by
       `NoUnsortedCases` due to `List.sort` assuming transitivity.  New sorting
