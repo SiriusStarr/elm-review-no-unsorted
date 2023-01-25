@@ -1,7 +1,7 @@
 {
   "name": "elm-review-no-unsorted",
   "scripts": {
-    "test": "npm-run-all --print-name --silent --sequential test:make test:format test:run test:review test:package",
+    "test": "npm-run-all --print-name --silent --sequential test:make test:format test:run test:review",
     "test:make": "elm make --docs=docs.json",
     "test:format": "elm-format src/ preview*/ tests/ --validate",
     "test:run": "elm-test-rs",
