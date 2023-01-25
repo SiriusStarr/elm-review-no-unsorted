@@ -699,8 +699,13 @@ type alias ModuleContext =
     , canonicalRecords : Dict ModuleName (Dict String KnownRecord)
     , constructors : Dict ModuleName (Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars })
     , functionTypes : Dict ModuleName (Dict String Type)
+    , exposed :
+        { aliases : Dict String TypeWithPositionalVars
+        , canonicalRecords : Dict String KnownRecord
+        , constructors : Dict String { customTypeName : Maybe String, type_ : TypeWithPositionalVars }
+        , functionTypes : Dict String Type
+        }
     , moduleName : ModuleName
-    , exposingList : Exposing
     , fileIsIgnored : Bool
     , lookupTable : ModuleNameLookupTable
     , extractSource : Range -> String
@@ -749,81 +754,35 @@ functions (since unexposed won't be relevant out of the module).
 -}
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
-    let
-        filterUnexposed : ModuleContext -> (List (Node TopLevelExpose) -> String -> a -> Bool) -> Dict ModuleName (Dict String a) -> Dict ModuleName (Dict String a)
-        filterUnexposed context isExposed =
-            Dict.update context.moduleName
-                (Maybe.map
-                    (case context.exposingList of
-                        All _ ->
-                            identity
-
-                        Explicit es ->
-                            Dict.filter (isExposed es)
-                    )
-                )
-    in
-    -- We already only work with module names, not `[]` for current module
     Rule.initContextCreator
-        (\moduleContext ->
-            { -- Aliases don't need to be filtered, since we need them to dereference functions
-              aliases = moduleContext.aliases
-            , canonicalRecords = filterUnexposed moduleContext aliasIsExposed moduleContext.canonicalRecords
-            , constructors = filterUnexposed moduleContext constructorIsExposed moduleContext.constructors
-            , functionTypes = filterUnexposed moduleContext functionIsExposed moduleContext.functionTypes
+        (\moduleName { exposed } ->
+            { aliases =
+                if Dict.isEmpty exposed.aliases then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposed.aliases
+            , canonicalRecords =
+                if Dict.isEmpty exposed.canonicalRecords then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposed.canonicalRecords
+            , constructors =
+                if Dict.isEmpty exposed.constructors then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposed.constructors
+            , functionTypes =
+                if Dict.isEmpty exposed.functionTypes then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposed.functionTypes
             }
         )
-
-
-{-| Check if a function is exposed by a module.
--}
-functionIsExposed : List (Node TopLevelExpose) -> String -> a -> Bool
-functionIsExposed es name _ =
-    List.any
-        (\e ->
-            case Node.value e of
-                FunctionExpose s ->
-                    s == name
-
-                _ ->
-                    False
-        )
-        es
-
-
-{-| Check if an alias is exposed by a module.
--}
-aliasIsExposed : List (Node TopLevelExpose) -> String -> a -> Bool
-aliasIsExposed es alias_ _ =
-    List.any
-        (\e ->
-            case Node.value e of
-                TypeOrAliasExpose s ->
-                    s == alias_
-
-                _ ->
-                    False
-        )
-        es
-
-
-{-| Check if a constructor is exposed by a module.
--}
-constructorIsExposed : List (Node TopLevelExpose) -> String -> { a | customTypeName : Maybe String } -> Bool
-constructorIsExposed es constructor { customTypeName } =
-    List.any
-        (\e ->
-            case ( Node.value e, customTypeName ) of
-                ( TypeExpose { name, open }, Just type_ ) ->
-                    name == type_ && MaybeX.isJust open
-
-                ( TypeOrAliasExpose name, Nothing ) ->
-                    name == constructor
-
-                _ ->
-                    False
-        )
-        es
+        |> Rule.withModuleName
 
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
