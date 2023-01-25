@@ -61,13 +61,12 @@ import Elm.Docs
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Exposing exposing (Exposing(..), TopLevelExpose(..))
 import Elm.Syntax.Expression exposing (Expression(..), Function, LetDeclaration(..), RecordSetter)
-import Elm.Syntax.Module as Module
+import Elm.Syntax.Module as Module exposing (Module)
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range as Range exposing (Location, Range)
 import Elm.Syntax.Type exposing (ValueConstructor)
-import Elm.Syntax.TypeAlias exposing (TypeAlias)
 import Elm.Syntax.TypeAnnotation as TypeAnnotation exposing (RecordDefinition, TypeAnnotation(..))
 import Elm.Type
 import List.Extra as ListX
@@ -329,7 +328,7 @@ rule config =
         |> Rule.withDependenciesProjectVisitor (\d c -> ( [], dependencyVisitor config c d ))
         |> Rule.withModuleVisitor (moduleVisitor config)
         |> Rule.withModuleContextUsingContextCreator
-            { fromProjectToModule = fromProjectToModule
+            { fromProjectToModule = fromProjectToModule config
             , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
@@ -727,7 +726,6 @@ checking all expressions for records.
 moduleVisitor : RuleConfig -> Rule.ModuleRuleSchema r ModuleContext -> Rule.ModuleRuleSchema { r | hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config c ds ))
         |> Rule.withDeclarationEnterVisitor
             (\d c ->
                 if c.fileIsIgnored then
@@ -787,15 +785,29 @@ fromModuleToProject =
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
 -}
-fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
-fromProjectToModule =
+fromProjectToModule : RuleConfig -> Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule config =
     Rule.initContextCreator
-        (\lookupTable sourceCodeExtractor moduleName fileIsIgnored { moduleDefinition } projectContext ->
-            { aliases = projectContext.aliases
-            , canonicalRecords = projectContext.canonicalRecords
-            , constructors = projectContext.constructors
-            , functionTypes = projectContext.functionTypes
-            , exposingList = Module.exposingList <| Node.value moduleDefinition
+        (\lookupTable sourceCodeExtractor moduleName fileIsIgnored { moduleDefinition, declarations } projectContext ->
+            let
+                { aliases, canonicalRecords, constructors, functionTypes, exposed } =
+                    declarationListVisitor config
+                        { moduleName = moduleName
+                        , lookupTable = lookupTable
+                        , aliases = projectContext.aliases
+                        , canonicalRecords = projectContext.canonicalRecords
+                        , constructors = projectContext.constructors
+                        , functionTypes = projectContext.functionTypes
+                        , exposingList = getExposedNames <| Node.value moduleDefinition
+                        , fileIsIgnored = fileIsIgnored
+                        }
+                        declarations
+            in
+            { aliases = aliases
+            , canonicalRecords = canonicalRecords
+            , constructors = constructors
+            , functionTypes = functionTypes
+            , exposed = exposed
             , fileIsIgnored = fileIsIgnored
             , moduleName = moduleName
             , lookupTable = lookupTable
