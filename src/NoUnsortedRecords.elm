@@ -1438,6 +1438,42 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                     }
            )
 
+
+{-| Given a top-level declaration, accumulate information from it for storing in
+module context, determining what to expose or not.
+-}
+accumulateDeclarationInfo :
+    SubrecordCanonicity
+    ->
+        { context
+            | moduleName : ModuleName
+            , lookupTable : ModuleNameLookupTable
+            , exposingList : Maybe ExposedNames
+            , fileIsIgnored : Bool
+        }
+    -> Node Declaration
+    ->
+        { aliases : List ( String, TypeWithPositionalVars )
+        , canonicalRecords : List ( String, KnownRecord )
+        , constructors : List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
+        , functionTypes : List ( String, Type )
+        , exposedAliases : List ( String, TypeWithPositionalVars )
+        , exposedCanonicalRecords : List ( String, KnownRecord )
+        , exposedConstructors : List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
+        , exposedFunctionTypes : List ( String, Type )
+        }
+    ->
+        { aliases : List ( String, TypeWithPositionalVars )
+        , canonicalRecords : List ( String, KnownRecord )
+        , constructors : List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
+        , functionTypes : List ( String, Type )
+        , exposedAliases : List ( String, TypeWithPositionalVars )
+        , exposedCanonicalRecords : List ( String, KnownRecord )
+        , exposedConstructors : List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } )
+        , exposedFunctionTypes : List ( String, Type )
+        }
+accumulateDeclarationInfo subrecordTreatment context node acc =
+    let
         makeConstructorAndSubrecords : TypeWithPositionalVars -> List (Node String) -> ValueConstructor -> ( String, TypeWithPositionalVars, List ( String, KnownRecord ) )
         makeConstructorAndSubrecords return typeVars { name, arguments } =
             List.map
@@ -1460,10 +1496,58 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                         )
                    )
 
-        getConstructorsAndRecordsFromDeclaration : Node Declaration -> ( List ( String, { customTypeName : Maybe String, type_ : TypeWithPositionalVars } ), List ( String, KnownRecord ) )
-        getConstructorsAndRecordsFromDeclaration node =
-            case Node.value node of
-                CustomTypeDeclaration { name, generics, constructors } ->
+        skipIfIgnored : (ExposedNames -> Bool) -> r -> (() -> info) -> (info -> r -> r) -> (info -> r -> r) -> r
+        skipIfIgnored checkIfExposed acc_ makeInfo addLocal addExposed =
+            let
+                isExposed : Bool
+                isExposed =
+                    MaybeX.unwrap True checkIfExposed context.exposingList
+            in
+            case ( context.fileIsIgnored, isExposed ) of
+                ( True, False ) ->
+                    acc_
+
+                ( True, True ) ->
+                    addExposed (makeInfo ()) acc_
+
+                ( False, True ) ->
+                    let
+                        info : info
+                        info =
+                            makeInfo ()
+                    in
+                    addExposed info <| addLocal info acc_
+
+                ( False, False ) ->
+                    addLocal (makeInfo ()) acc_
+    in
+    case Node.value node of
+        FunctionDeclaration { signature } ->
+            Maybe.map Node.value signature
+                |> MaybeX.unwrap acc
+                    (\{ name, typeAnnotation } ->
+                        let
+                            n : String
+                            n =
+                                Node.value name
+                        in
+                        skipIfIgnored (Set.member n << .functions)
+                            acc
+                            -- Function declarations do not have canonical record orders nor do they have type variables (that might be made concrete)
+                            (\() -> ( n, typeAnnotToNoncanonicalType context typeAnnotation ))
+                            (\info acc_ -> { acc_ | functionTypes = info :: acc.functionTypes })
+                            (\info acc_ -> { acc_ | exposedFunctionTypes = info :: acc.exposedFunctionTypes })
+                    )
+
+        CustomTypeDeclaration { name, generics, constructors } ->
+            let
+                n : String
+                n =
+                    Node.value name
+            in
+            skipIfIgnored (Set.member n << .openTypes)
+                acc
+                (\() ->
                     List.foldl
                         (\c ( fAcc, rAcc ) ->
                             Node.value c
@@ -1471,7 +1555,7 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                                     (List.map Node.value generics
                                         |> (\gs ->
                                                 List.map (TypeVar Nothing) gs
-                                                    |> NamedType ( [], Node.value name )
+                                                    |> NamedType ( [], n )
                                                     |> DereferencedType
                                                     |> assignTypeVars (makePositionalArgTypeVars gs)
                                                     |> getType
@@ -1479,9 +1563,9 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                                            )
                                     )
                                     generics
-                                |> (\( n, type_, rs ) ->
-                                        ( ( n
-                                          , { customTypeName = Just <| Node.value name
+                                |> (\( n_, type_, rs ) ->
+                                        ( ( n_
+                                          , { customTypeName = Just n
                                             , type_ = type_
                                             }
                                           )
@@ -1492,16 +1576,44 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                         )
                         ( [], [] )
                         constructors
+                )
+                (\( newConstructors, newRecords ) acc_ ->
+                    { acc_
+                        | constructors = newConstructors ++ acc.constructors
+                        , canonicalRecords = newRecords ++ acc.canonicalRecords
+                    }
+                )
+                (\( newConstructors, newRecords ) acc_ ->
+                    { acc_
+                        | exposedConstructors = newConstructors ++ acc.exposedConstructors
+                        , exposedCanonicalRecords = newRecords ++ acc.exposedCanonicalRecords
+                    }
+                )
 
-                AliasDeclaration { name, generics, typeAnnotation } ->
+        AliasDeclaration { name, generics, typeAnnotation } ->
+            let
+                n : String
+                n =
+                    Node.value name
+
+                aliasInfo : ( String, TypeWithPositionalVars )
+                aliasInfo =
+                    ( n
+                    , typeAnnotToTypeWithPositionalVars context
+                        -- Constrained type vars are not respected for aliases
+                        { constrainedTypeVarsAreRespected = False
+                        , subrecordIsAlsoCanonical = subrecordCanonicityForRecord subrecordTreatment
+                        }
+                        (List.map Node.value generics)
+                        typeAnnotation
+                    )
+            in
+            skipIfIgnored (Set.member n << .types)
+                { acc | exposedAliases = aliasInfo :: acc.exposedAliases }
+                (\() ->
                     annotToFields typeAnnotation
-                        |> Maybe.map
+                        |> MaybeX.unwrap ( [], [] )
                             (\( fields, isGeneric ) ->
-                                let
-                                    n : String
-                                    n =
-                                        Node.value name
-                                in
                                 ( -- Generic records do not have constructors.
                                   if isGeneric then
                                     []
@@ -1538,56 +1650,27 @@ declarationListVisitor (RuleConfig { subrecordTreatment }) context declarations 
                                     |> List.map (Tuple.mapFirst (\s -> n ++ s))
                                 )
                             )
-                        |> Maybe.withDefault ( [], [] )
-
-                _ ->
-                    ( [], [] )
-
-        getFunctionsFromDeclaration : Node Declaration -> Maybe ( String, Type )
-        getFunctionsFromDeclaration node =
-            case Node.value node of
-                FunctionDeclaration { signature } ->
-                    Maybe.map Node.value signature
-                        |> Maybe.map
-                            (\{ name, typeAnnotation } ->
-                                -- Function declarations do not have canonical record orders nor do they have type variables (that might be made concrete)
-                                typeAnnotToNoncanonicalType context typeAnnotation
-                                    |> Tuple.pair (Node.value name)
-                            )
-
-                _ ->
-                    Nothing
-
-        ( newConstructors, newRecords ) =
-            List.foldl
-                (\d ( fAcc, rAcc ) ->
-                    getConstructorsAndRecordsFromDeclaration d
-                        |> (\( fs, rs ) -> ( fs ++ fAcc, rs ++ rAcc ))
                 )
-                ( [], [] )
-                declarations
-    in
-    -- Find aliases, canonical records, and function types and store them
-    { context
-        | aliases =
-            List.filterMap (Maybe.map makeAliasInfo << getAlias) declarations
-                |> validate (not << List.isEmpty)
-                |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.aliases (\v -> Dict.insert context.moduleName v context.aliases)
-        , canonicalRecords =
-            validate (not << List.isEmpty) newRecords
-                |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.canonicalRecords (\v -> Dict.insert context.moduleName v context.canonicalRecords)
-        , constructors =
-            validate (not << List.isEmpty) newConstructors
-                |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.constructors (\v -> Dict.insert context.moduleName v context.constructors)
-        , functionTypes =
-            List.filterMap getFunctionsFromDeclaration declarations
-                |> validate (not << List.isEmpty)
-                |> Maybe.map Dict.fromList
-                |> MaybeX.unwrap context.functionTypes (\v -> Dict.insert context.moduleName v context.functionTypes)
-    }
+                (\( newConstructors, newRecords ) acc_ ->
+                    { acc_
+                        | aliases = aliasInfo :: acc.aliases
+                        , constructors = newConstructors ++ acc.constructors
+                        , canonicalRecords = newRecords ++ acc.canonicalRecords
+                    }
+                )
+                (\( newConstructors, newRecords ) acc_ ->
+                    { acc_
+                        | exposedConstructors = newConstructors ++ acc.exposedConstructors
+                        , exposedCanonicalRecords = newRecords ++ acc.exposedCanonicalRecords
+                    }
+                )
+
+        _ ->
+            -- Nothing to do for:
+            -- PortDeclaration
+            -- InfixDeclaration
+            -- Destructuring
+            acc
 
 
 {-| Visit each TLD and check it in turn.
