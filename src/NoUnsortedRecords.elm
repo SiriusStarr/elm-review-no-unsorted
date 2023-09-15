@@ -2453,7 +2453,7 @@ checkOperatorApplication checkApp op e1 e2 =
 
         _ ->
             -- Other operators, we don't know (or rather care) what they do, so just treat them like functions
-            checkApp [ Node Range.emptyRange <| PrefixOperator op, e1, e2 ]
+            checkApp [ Node Range.empty <| PrefixOperator op, e1, e2 ]
 
 
 {-| Check a chain of expressions being applied to the first one, as we can glean

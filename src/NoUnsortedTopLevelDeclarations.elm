@@ -788,7 +788,7 @@ initialContext =
         (\extractSource () ->
             { extractSource = extractSource
             , exports = Nothing
-            , errorRange = Range.emptyRange
+            , errorRange = Range.empty
             , unparsedDocComments = []
             , moduleImportRange = Nothing
             }
