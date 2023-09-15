@@ -280,30 +280,30 @@ type SortTypesFromDependencies
   - Unsortable patterns can be looked beyond to resolve ties, for example:
 
 ```
-func custom =
-    case custom of
-        Container { field } Bar ->
-            not field
+func x =
+    case x of
+        T () Bar ->
+            1
 
-        Container { field } Baz ->
-            field
+        T () Baz ->
+            2
 
-        Container { field } Foo ->
-            field
+        T () Foo ->
+            3
 ```
 
 will be sorted to
 
-    func custom =
-        case custom of
-            Container { field } Foo ->
-                field
+    func x =
+        case x of
+            T () Foo ->
+                3
 
-            Container { field } Bar ->
-                not field
+            T () Bar ->
+                1
 
-            Container { field } Baz ->
-                field
+            T () Baz ->
+                2
 
 Use `doNotSortLiterals`, `sortListPatternsByLength`, etc. to alter any of this
 behavior, e.g.
@@ -513,18 +513,55 @@ doNotSortTypesFromDependencies (RuleConfig c) =
     RuleConfig { c | sortTypesFromDependencies = DoNotSort }
 
 
-{-| Do not look beyond unsortable patterns, rendering the following unsortable:
+{-| Do not look beyond unsortable patterns, i.e. do not tiebreak cases with an
+unsortable sub-pattern by the next sub-pattern.
 
-    func custom =
-        case custom of
-            Container { field } Bar ->
-                not field
+For example, given this:
 
-            Container { field } Baz ->
-                field
+    type X
+        = A
+        | B () Int
 
-            Container { field } Foo ->
-                field
+    f x =
+        case x of
+            B () 2 ->
+                1
+
+            B () 1 ->
+                2
+
+            A ->
+                3
+
+By **default**, this will be sorted to:
+
+    case x of
+        A ->
+            3
+
+        -- v The rule sorted these patterns because even though it can't compare the (), 1 comes before 2
+        B () 1 ->
+            2
+
+        B () 2 ->
+            1
+
+With `doNotLookPastUnsortable`, however, the two `B` patterns will be considered
+unsortable, so it will instead be sorted to this:
+
+    case x of
+        A ->
+            3
+
+        -- v Comparison stopped for these patterns because the rule didn't look beyond the ()
+        B () 2 ->
+            1
+
+        B () 1 ->
+            2
+
+Note that `A` is sorted above `B` in both cases because it did not require
+comparing the unsortable `()` pattern.
 
 -}
 doNotLookPastUnsortable : RuleConfig -> RuleConfig
