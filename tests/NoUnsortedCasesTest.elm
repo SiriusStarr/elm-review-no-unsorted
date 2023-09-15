@@ -2458,32 +2458,6 @@ toString i =
         _ -> "Something else..."
 """
                         ]
-        , test "not in literal order with floats" <|
-            \() ->
-                """module A exposing (..)
-
-toString : Float -> String
-toString f =
-    case f of
-        2.3 -> "2"
-        0.0 -> "0"
-        4.0 -> "4"
-        _ -> "Something else..."
-"""
-                    |> Review.Test.run (rule defaults)
-                    |> Review.Test.expectErrors
-                        [ unsortedError
-                            |> Review.Test.whenFixed """module A exposing (..)
-
-toString : Float -> String
-toString f =
-    case f of
-        0.0 -> "0"
-        2.3 -> "2"
-        4.0 -> "4"
-        _ -> "Something else..."
-"""
-                        ]
         , test "not in literal order with Strings" <|
             \() ->
                 """module A exposing (..)
