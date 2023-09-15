@@ -2776,6 +2776,50 @@ toString c =
         Container 1 {field} Baz 1 -> "Baz"
 """
                         ]
+        , test "does not sort past non-sortable patterns when specified" <|
+            \() ->
+                """module A exposing (..)
+
+type X
+    = A
+    | B () Int
+
+f x =
+    case x of
+        B () 2 ->
+            1
+
+        B () 1 ->
+            1
+
+        A ->
+            1
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> doNotLookPastUnsortable
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type X
+    = A
+    | B () Int
+
+f x =
+    case x of
+        A ->
+            1
+
+        B () 2 ->
+            1
+
+        B () 1 ->
+            1
+"""
+                        ]
         ]
 
 
