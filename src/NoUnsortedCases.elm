@@ -563,6 +563,9 @@ unsortable, so it will instead be sorted to this:
 Note that `A` is sorted above `B` in both cases because it did not require
 comparing the unsortable `()` pattern.
 
+_It's not clear why you'd ever want to use this, so it will likely be removed in
+a future major version. Please let me know if you actually find it useful!_
+
 -}
 doNotLookPastUnsortable : RuleConfig -> RuleConfig
 doNotLookPastUnsortable (RuleConfig c) =
