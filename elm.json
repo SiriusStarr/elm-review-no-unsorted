@@ -3,7 +3,7 @@
     "name": "SiriusStarr/elm-review-no-unsorted",
     "summary": "elm-review rules to ensure sortable code is sorted in the \"proper\" order.",
     "license": "GPL-3.0",
-    "version": "1.1.4",
+    "version": "1.1.5",
     "exposed-modules": [
         "NoUnsortedCases",
         "NoUnsortedLetDeclarations",
