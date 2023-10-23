@@ -52,7 +52,7 @@ elm-review --template SiriusStarr/elm-review-no-unsorted/example
 
 ## Changelog
 
-* `1.1.6` -- 🐛 Fix bug in `NoUnsortedCases` where multiple record matches were
+* `1.1.6` -- 🐛 Fix bug in `NoUnsortedRecords` where multiple record matches were
   not considered identical orderings if the indices of the matching fields were
   different. For example, the following record update was considered ambiguous
   before this bug fix:
