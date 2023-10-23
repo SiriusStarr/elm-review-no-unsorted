@@ -174,7 +174,7 @@ a = { b = 2, a = 1, c = 3 }
                             |> rule
                         )
                     |> Review.Test.expectNoErrors
-        , test "passes unambiguous record (because of identical field orders" <|
+        , test "passes unambiguous record (because of identical field orders)" <|
             \() ->
                 """module A exposing (..)
 
@@ -184,6 +184,26 @@ type alias B = { b : Int, c : Int, a : Int }
 a = { b = 2, c = 3, a = 1 }
 """
                     |> Review.Test.run (rule defaults)
+                    |> Review.Test.expectNoErrors
+        , test "passes records with same sorting but different indices (due to missing fields)" <|
+            \() ->
+                """module A exposing (..)
+
+type alias A =
+    { a : Int
+    , b : String
+    , c : Bool
+    }
+type alias B =
+    { b : String, c : Bool }
+
+a r info = { r | b = info.b, c = info.c }
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
                     |> Review.Test.expectNoErrors
         , test "reports ambiguous record that is not alphabetical with option" <|
             \() ->
