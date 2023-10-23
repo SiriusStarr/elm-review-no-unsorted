@@ -3099,7 +3099,7 @@ makeOrder sortGenerics inFields (FieldOrder inOrder) =
                 GenericFieldsLast ->
                     1000000
 
-        go : Int -> List Field -> FieldOrder -> ( Dict String Int, Bool )
+        go : Int -> List Field -> FieldOrder -> ( List ( String, Int ), Bool )
         go offsetMult fieldsToMake (FieldOrder { canonical, generic }) =
             let
                 step : Field -> ( List ( String, Int ), List Field ) -> ( List ( String, Int ), List Field )
@@ -3117,7 +3117,7 @@ makeOrder sortGenerics inFields (FieldOrder inOrder) =
                             ( canAcc, f :: genAcc )
             in
             List.foldl step ( [], [] ) fieldsToMake
-                |> Tuple.mapBoth Dict.fromList
+                |> Tuple.mapSecond
                     (\fs ->
                         case generic of
                             Just (OrderedFields order) ->
@@ -3138,18 +3138,25 @@ makeOrder sortGenerics inFields (FieldOrder inOrder) =
                                         )
                                     )
                                     fs
-                                    |> Dict.fromList
                                 , True
                                 )
 
                             Nothing ->
-                                ( Dict.empty, False )
+                                ( [], False )
                     )
-                |> (\( f1s, ( f2s, unknown ) ) -> ( Dict.union f1s f2s, unknown ))
+                |> (\( f1s, ( f2s, unknown ) ) -> ( f1s ++ f2s, unknown ))
     in
     go 0 inFields (FieldOrder inOrder)
         |> (\( fieldOrder, hasUnknownFields ) ->
-                { fieldOrder = fieldOrder, hasUnknownFields = hasUnknownFields, canonicalFieldTypes = Dict.map (\_ v -> Tuple.second v) inOrder.canonical }
+                { fieldOrder =
+                    fieldOrder
+                        |> List.sortBy Tuple.second
+                        -- Reindex sorting from 0, since fields may be missing
+                        |> List.indexedMap (\i ( f, _ ) -> ( f, i ))
+                        |> Dict.fromList
+                , hasUnknownFields = hasUnknownFields
+                , canonicalFieldTypes = Dict.map (\_ v -> Tuple.second v) inOrder.canonical
+                }
            )
 
 
