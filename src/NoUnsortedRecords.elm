@@ -617,6 +617,7 @@ its field order should be.
 -}
 type OrderInfo
     = HasFieldOrder FieldOrder
+    | HasTheseFields { fields : Dict String DereferencedType, hasAllFields : Bool }
     | HasAllFields
 
 
@@ -2118,6 +2119,7 @@ bindingsInPatternWithType context pattern type_ =
 
         RecordPattern ps ->
             getRecordFieldTypes type_
+                |> .types
                 |> (\ts ->
                         List.map
                             (\p ->
@@ -2350,14 +2352,13 @@ checkExpression config local hasType node =
         RecordExpr recordSetters ->
             -- A record expression has to have all fields of the known record
             let
-                ts : Dict String DereferencedType
-                ts =
+                { types } =
                     getRecordFieldTypes hasType
             in
             recordSettersToCheckable local (Node.range node) True hasType recordSetters
                 |> checkRecord config local.context
                 -- Used any found record information to check subrecords
-                |> checkFields ts (List.map Node.value recordSetters)
+                |> checkFields types (List.map Node.value recordSetters)
 
         RecordUpdateExpression _ recordSetters ->
             -- A record update must have the same type as the record, so type is useful
@@ -2369,14 +2370,13 @@ checkExpression config local hasType node =
                     hasType
                         |> MaybeX.orElseLazy (\() -> inferExprType local node)
 
-                ts : Dict String DereferencedType
-                ts =
+                { types } =
                     getRecordFieldTypes updateType
             in
             recordSettersToCheckable local (Node.range node) False updateType recordSetters
                 |> checkRecord config local.context
                 -- Used any found record information to check subrecords
-                |> checkFields ts (List.map Node.value recordSetters)
+                |> checkFields types (List.map Node.value recordSetters)
 
         RecordAccess e accessFunc ->
             go (makeRecordAccessType hasType <| Node.value accessFunc) e
@@ -2673,14 +2673,16 @@ getTupleTypes emptyList assocType =
 
 {-| Get all types for a record's fields.
 -}
-getRecordFieldTypes : Maybe DereferencedType -> Dict String DereferencedType
+getRecordFieldTypes : Maybe DereferencedType -> { types : Dict String DereferencedType, hasAllFields : Bool }
 getRecordFieldTypes type_ =
     case Maybe.map getType type_ of
-        Just (RecordType { fields }) ->
-            Dict.fromList <| List.map (Tuple.mapSecond DereferencedType) fields
+        Just (RecordType { fields, generic }) ->
+            { types = Dict.fromList <| List.map (Tuple.mapSecond DereferencedType) fields
+            , hasAllFields = generic == Nothing
+            }
 
         _ ->
-            Dict.empty
+            { types = Dict.empty, hasAllFields = False }
 
 
 {-| Descend into pattern, keeping as much type information as possible.
@@ -2843,14 +2845,20 @@ checkable record.
 recordPatternToCheckable : Range -> Maybe DereferencedType -> List (Node String) -> RecordToCheck
 recordPatternToCheckable fullRange hasType =
     let
-        types : Dict String DereferencedType
-        types =
+        { types, hasAllFields } =
             getRecordFieldTypes hasType
 
         orderInfo : Maybe OrderInfo
         orderInfo =
             Maybe.andThen (Result.toMaybe << makeFieldOrder) hasType
                 |> Maybe.map HasFieldOrder
+                |> MaybeX.orElse
+                    (if Dict.isEmpty types then
+                        Nothing
+
+                     else
+                        Just <| HasTheseFields { fields = types, hasAllFields = hasAllFields }
+                    )
     in
     List.map
         (\r ->
@@ -2873,23 +2881,20 @@ type, and maybe a type, convert a list of record setters to a checkable record.
 recordSettersToCheckable : LocalContext -> Range -> Bool -> Maybe DereferencedType -> List (Node RecordSetter) -> RecordToCheck
 recordSettersToCheckable context fullRange hasAllFields hasType =
     let
-        fallback : Maybe OrderInfo
-        fallback =
-            if hasAllFields then
-                Just HasAllFields
-
-            else
-                Nothing
-
-        types : Dict String DereferencedType
-        types =
+        { types } =
             getRecordFieldTypes hasType
 
         orderInfo : Maybe OrderInfo
         orderInfo =
             Maybe.andThen (Result.toMaybe << makeFieldOrder) hasType
                 |> Maybe.map HasFieldOrder
-                |> MaybeX.orElse fallback
+                |> MaybeX.orElse
+                    (if hasAllFields then
+                        Just HasAllFields
+
+                     else
+                        Nothing
+                    )
     in
     List.map
         (\r ->
@@ -3227,6 +3232,9 @@ findMatchingTypes config context info matchFields =
                 Just HasAllFields ->
                     True
 
+                Just (HasTheseFields r) ->
+                    r.hasAllFields
+
                 _ ->
                     False
     in
@@ -3238,6 +3246,17 @@ findMatchingTypes config context info matchFields =
               , isSubrecord = False
               }
             ]
+
+        Just (HasTheseFields { fields }) ->
+            -- If we know that the record has extra fields, add them in and search for them as well
+            List.map (\f -> ( f.field, f )) matchFields
+                |> Dict.fromList
+                |> (\d ->
+                        Dict.map (\f t -> { field = f, type_ = Just t, range = Range.empty }) fields
+                            |> Dict.union d
+                   )
+                |> Dict.values
+                |> getMatches
 
         _ ->
             getMatches matchFields
@@ -3635,6 +3654,7 @@ inferExprType local =
                     go typeVarPrefix e
                         |> Maybe.map DereferencedType
                         |> getRecordFieldTypes
+                        |> .types
                         |> (\ts ->
                                 Node.value accessFunc
                                     |> makeAccessFunc
@@ -3756,6 +3776,7 @@ inferApplicationChain local es =
                     List.head args
                         |> Maybe.andThen inferExpr
                         |> getRecordFieldTypes
+                        |> .types
                         |> (\ts ->
                                 makeAccessFunc accessFunc
                                     |> (\f -> Dict.get f ts)
