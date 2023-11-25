@@ -822,6 +822,133 @@ a : Int -> A -> Int -> Bool
 a i1 { foo, bar, baz } i2 = True
 """
                         ]
+        , test "disambiguation of a pattern that matches nothing is possible because of type annotation" <|
+            \() ->
+                """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { bar : Int, foo : Int } -> Int
+fooBar { foo, bar } = foo + bar
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 8, column = 8 }, end = { row = 8, column = 9 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { bar : Int, foo : Int } -> Int
+fooBar { bar, foo } = foo + bar
+"""
+                        ]
+        , test "disambiguation of a pattern that matches nothing is possible because of type annotation even when not all fields are destructured" <|
+            \() ->
+                """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { bar : Int, extra : Int, foo : Int } -> Int
+fooBar { foo, bar } = foo + bar
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 8, column = 8 }, end = { row = 8, column = 9 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { bar : Int, extra : Int, foo : Int } -> Int
+fooBar { bar, foo } = foo + bar
+"""
+                        ]
+        , test "disambiguation of a pattern that matches nothing is possible because of type annotation even when not all fields are destructured when generic has field not in other matches" <|
+            \() ->
+                """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { r | bar : Int, extra : Int, foo : Int } -> Int
+fooBar { foo, bar } = foo + bar
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ unsortedError
+                            |> Review.Test.atExactly { start = { row = 8, column = 8 }, end = { row = 8, column = 9 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { r | bar : Int, extra : Int, foo : Int } -> Int
+fooBar { bar, foo } = foo + bar
+"""
+                        ]
+        , test "disambiguation of a pattern that matches nothing is not possible because of generic type annotation without extra fields" <|
+            \() ->
+                """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar : { r | bar : Int, foo : Int } -> Int
+fooBar { foo, bar } = foo + bar
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ ambiguousRecordError [ "A.BBF", "A.FBB" ] "{ foo, bar }"
+                        , ambiguousRecordError [ "A.BBF", "A.FBB" ] "{ r | bar : Int, foo : Int }"
+                        ]
+        , test "disambiguation of a pattern that matches multiple without is not possible" <|
+            \() ->
+                """module A exposing (..)
+
+type alias FBB = { foo : Int, bar : Int, baz : Int }
+
+type alias BBF = { bar : Int, baz : Int, foo : Int }
+
+fooBar { foo, bar } = foo + bar
+"""
+                    |> Review.Test.run
+                        (defaults
+                            |> reportAmbiguousRecordsWithoutFix
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ ambiguousRecordError
+                            [ "A.BBF", "A.FBB" ]
+                            "{ foo, bar }"
+                        ]
         ]
 
 
