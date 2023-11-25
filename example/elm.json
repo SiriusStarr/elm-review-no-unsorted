@@ -16,7 +16,7 @@
             "elm-community/string-extra": "4.0.1",
             "jfmengels/elm-review": "2.13.1",
             "stil4m/elm-syntax": "7.3.2",
-            "SiriusStarr/elm-review-no-unsorted": "1.1.6"
+            "SiriusStarr/elm-review-no-unsorted": "1.1.7"
         },
         "indirect": {
             "avh4/elm-fifo": "1.0.4",
