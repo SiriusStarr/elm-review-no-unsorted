@@ -1147,6 +1147,41 @@ func = foo { foo = 1, bar = 2, baz = 3 }
                             ]
                           )
                         ]
+        , test "possible because of type annotation in indirect import" <|
+            \() ->
+                [ """module C exposing (..)
+
+type alias C = { foo : Int, bar : Int, baz : Int }
+"""
+                , """module B exposing (..)
+
+import C exposing (C)
+
+type B = B C
+"""
+                , """module A exposing (..)
+
+import B exposing (B(..))
+
+b : B
+b = B { bar = 2, foo = 1, baz = 3 }
+"""
+                ]
+                    |> Review.Test.runOnModules (rule defaults)
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "A"
+                          , [ unsortedError
+                                |> Review.Test.atExactly { start = { row = 6, column = 7 }, end = { row = 6, column = 8 } }
+                                |> Review.Test.whenFixed """module A exposing (..)
+
+import B exposing (B(..))
+
+b : B
+b = B { foo = 1, bar = 2, baz = 3 }
+"""
+                            ]
+                          )
+                        ]
         , test "does not keep unexposed functions" <|
             \() ->
                 [ """module B exposing (A)
