@@ -333,7 +333,6 @@ rule config =
             , foldProjectContexts = foldProjectContexts
             }
         |> Rule.withContextFromImportedModules
-        |> Rule.providesFixesForProjectRule
         |> Rule.fromProjectRuleSchema
 
 
@@ -1212,7 +1211,7 @@ docTypeToType moduleName ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCano
                 |> ListX.unconsLast
                 |> Maybe.map
                     (\( n, m ) ->
-                        if m == [] then
+                        if List.isEmpty m then
                             ( moduleName, n )
 
                         else
@@ -1834,7 +1833,7 @@ typeAnnotToType context ({ constrainedTypeVarsAreRespected, subrecordIsAlsoCanon
             moduleNameFor context.lookupTable name
                 |> Maybe.withDefault (Tuple.first <| Node.value name)
                 |> (\moduleName ->
-                        if moduleName == [] then
+                        if List.isEmpty moduleName then
                             -- If the module name is empty, then update to current module name
                             context.moduleName
 
@@ -2589,7 +2588,7 @@ findFunctionType { context, localFunctions } type_ moduleNode name =
     moduleNameFor context.lookupTable moduleNode
         |> Maybe.map
             (\moduleName ->
-                if moduleName == [] then
+                if List.isEmpty moduleName then
                     context.moduleName
 
                 else
